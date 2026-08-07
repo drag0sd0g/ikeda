@@ -21,6 +21,7 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.19.0")
     implementation("org.apache.commons:commons-csv:1.14.1")
     implementation("org.slf4j:slf4j-api:2.0.17")
+    implementation("org.xerial:sqlite-jdbc:3.49.1.0")
     runtimeOnly("ch.qos.logback:logback-classic:1.5.18")
 
     testImplementation(platform("org.junit:junit-bom:5.12.2"))

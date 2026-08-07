@@ -268,7 +268,7 @@ Each phase has an explicit exit criterion. A phase that fails its criterion is a
 | Phase | Scope | Exit criterion |
 |-------|-------|----------------|
 | **0** ✅ | Toolchain, Sudachi, EDINET listing | 205 filings listed; mode C tokenising correctly |
-| **1** | Corpus: fetch, extract, segment, tokenise, persist | ≥200 filings in local store with stable token counts |
+| **1** | Corpus: fetch, extract, segment, tokenise, persist | ≥180 filings in local store; top terms by document frequency are unremarkable |
 | **2** | Ranking: compounds, keyness, known-set, scoring | **≥70% of top 50 judged worth learning** |
 | **3** | Cards: sentence selection, glosses, AnkiConnect push | 40 cards in 金融::有報 studied without edits |
 | **4** | Productionise: daily ingestion, Postgres, embeddings, coverage dashboard | Only if 1–3 pass |

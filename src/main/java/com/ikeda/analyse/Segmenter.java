@@ -45,8 +45,25 @@ public final class Segmenter implements AutoCloseable {
         }
     }
 
-    /** One sentence of prose with its morphemes, already tokenised in mode C. */
-    public record Sentence(String elementId, String text, List<Morpheme> morphemes) {
+    /**
+     * One sentence of prose with its morphemes, already tokenised in mode C.
+     *
+     * <p>Morphemes are retained because phase 2 compound reconstruction needs the
+     * token sequence. {@link #analysed()} projects to the Sudachi-free form the
+     * store consumes.
+     */
+    public record Sentence(int blockIndex, int seq, String elementId, String text,
+                           List<Morpheme> morphemes) {
+
+        public AnalysedSentence analysed() {
+            List<TermOccurrence> terms = morphemes.stream()
+                    .filter(Segmenter::isContentWord)
+                    .map(m -> new TermOccurrence(
+                            m.normalizedForm(), m.surface(), m.readingForm(),
+                            m.partOfSpeech().getFirst(), m.begin()))
+                    .toList();
+            return new AnalysedSentence(blockIndex, seq, elementId, text, morphemes.size(), terms);
+        }
     }
 
     public record SegmentationStats(int blocks, int segments, int prose, int duplicates) {
@@ -63,6 +80,10 @@ public final class Segmenter implements AutoCloseable {
     }
 
     public record Segmentation(List<Sentence> sentences, SegmentationStats stats) {
+
+        public List<AnalysedSentence> analysed() {
+            return sentences.stream().map(Sentence::analysed).toList();
+        }
     }
 
     public Segmentation segment(List<NarrativeBlock> blocks) {
@@ -72,9 +93,13 @@ public final class Segmenter implements AutoCloseable {
         int prose = 0;
         int duplicates = 0;
 
-        for (NarrativeBlock block : blocks) {
+        for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
+            NarrativeBlock block = blocks.get(blockIndex);
+            int seq = 0;
+
             for (var morphemes : tokenizer.tokenizeSentences(Tokenizer.SplitMode.C, block.text())) {
                 segments++;
+                int currentSeq = seq++;
                 String text = morphemes.stream()
                         .map(Morpheme::surface)
                         .collect(Collectors.joining())
@@ -88,7 +113,8 @@ public final class Segmenter implements AutoCloseable {
                     duplicates++;
                     continue;
                 }
-                sentences.add(new Sentence(block.elementId(), text, List.copyOf(morphemes)));
+                sentences.add(new Sentence(
+                        blockIndex, currentSeq, block.elementId(), text, List.copyOf(morphemes)));
             }
         }
 
