@@ -3,3 +3,8 @@
 build/
 dict/
 .env
+
+# Local corpus, rebuilt by re-ingesting from EDINET (-shm and -wal are WAL sidecars)
+ikeda.db
+ikeda.db-shm
+ikeda.db-wal
