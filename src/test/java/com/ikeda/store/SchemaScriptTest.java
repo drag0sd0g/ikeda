@@ -14,7 +14,7 @@ class SchemaScriptTest {
     @Test
     @DisplayName("splits statements on semicolons")
     void splitsOnSemicolons() {
-        assertThat(CorpusStore.splitStatements("CREATE TABLE a (x INT); CREATE TABLE b (y INT);"))
+        assertThat(Database.splitStatements("CREATE TABLE a (x INT); CREATE TABLE b (y INT);"))
                 .containsExactly("CREATE TABLE a (x INT)", "CREATE TABLE b (y INT)");
     }
 
@@ -26,7 +26,7 @@ class SchemaScriptTest {
                 CREATE TABLE a (x INT);
                 """;
 
-        assertThat(CorpusStore.splitStatements(script))
+        assertThat(Database.splitStatements(script))
                 .containsExactly("CREATE TABLE a (x INT)");
     }
 
@@ -35,25 +35,25 @@ class SchemaScriptTest {
     void stripsTrailingComments() {
         String script = "CREATE TABLE a (x INT);  -- why this table exists; at length\n";
 
-        assertThat(CorpusStore.splitStatements(script))
+        assertThat(Database.splitStatements(script))
                 .containsExactly("CREATE TABLE a (x INT)");
     }
 
     @Test
     @DisplayName("drops blank and comment-only content")
     void dropsEmptyStatements() {
-        assertThat(CorpusStore.splitStatements("-- just a comment\n\n   \n")).isEmpty();
-        assertThat(CorpusStore.splitStatements("")).isEmpty();
+        assertThat(Database.splitStatements("-- just a comment\n\n   \n")).isEmpty();
+        assertThat(Database.splitStatements("")).isEmpty();
     }
 
     @Test
     @DisplayName("the shipped schema parses into statements, all of them CREATE")
     void shippedSchemaIsWellFormed() throws Exception {
         String schema = new String(
-                CorpusStore.class.getResourceAsStream("/schema.sql").readAllBytes(),
+                Database.class.getResourceAsStream("/schema.sql").readAllBytes(),
                 java.nio.charset.StandardCharsets.UTF_8);
 
-        assertThat(CorpusStore.splitStatements(schema))
+        assertThat(Database.splitStatements(schema))
                 .isNotEmpty()
                 .allSatisfy(statement -> assertThat(statement).startsWith("CREATE"));
     }

@@ -7,23 +7,15 @@ import com.ikeda.ingest.NarrativeBlock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * The corpus: filings, their narrative blocks, the prose sentences extracted from
@@ -33,16 +25,12 @@ import java.util.stream.Collectors;
  * absent, which together with {@link #hasFiling(String)} makes a run safe to
  * interrupt and resume — worth having when a full pass takes a quarter of an hour
  * of rate-limited downloading.
- *
- * <p>Not thread safe: one connection, one writer.
  */
-public final class CorpusStore implements AutoCloseable {
+public final class CorpusStore {
 
     private static final Logger log = LoggerFactory.getLogger(CorpusStore.class);
 
-    private static final String SCHEMA_RESOURCE = "/schema.sql";
-
-    private final Connection connection;
+    private final Database database;
 
     /**
      * Maps term key to primary key, so a repeated word costs a hash lookup rather
@@ -51,79 +39,17 @@ public final class CorpusStore implements AutoCloseable {
      */
     private final Map<String, Long> termIds = new HashMap<>();
 
-    private CorpusStore(String jdbcUrl) {
-        try {
-            this.connection = DriverManager.getConnection(jdbcUrl);
-            configure();
-            applySchema();
-        } catch (SQLException e) {
-            throw new StoreException("cannot open corpus store: " + jdbcUrl, e);
-        }
+    public CorpusStore(Database database) {
+        this.database = database;
     }
 
-    public static CorpusStore open(Path path) {
-        return new CorpusStore("jdbc:sqlite:" + path);
-    }
-
-    /** For tests: a private database that never touches disk. */
-    public static CorpusStore inMemory() {
-        return new CorpusStore("jdbc:sqlite::memory:");
-    }
-
-    private void configure() throws SQLException {
-        try (Statement statement = connection.createStatement()) {
-            // SQLite leaves foreign keys unenforced unless asked, per connection.
-            statement.execute("PRAGMA foreign_keys = ON");
-            // WAL plus NORMAL avoids a disk sync per transaction. Silently ignored
-            // for in-memory databases, which have no journal to speak of.
-            statement.execute("PRAGMA journal_mode = WAL");
-            statement.execute("PRAGMA synchronous = NORMAL");
-        }
-        connection.setAutoCommit(false);
-    }
-
-    private void applySchema() throws SQLException {
-        try (InputStream in = CorpusStore.class.getResourceAsStream(SCHEMA_RESOURCE)) {
-            if (in == null) {
-                throw new IllegalStateException("missing resource " + SCHEMA_RESOURCE);
-            }
-            String schema = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-            try (Statement statement = connection.createStatement()) {
-                for (String ddl : splitStatements(schema)) {
-                    statement.executeUpdate(ddl);
-                }
-            }
-            connection.commit();
-        } catch (IOException e) {
-            throw new UncheckedIOException("cannot read " + SCHEMA_RESOURCE, e);
-        }
-    }
-
-    /**
-     * Splits a DDL script into statements.
-     *
-     * <p>Line comments are stripped first: the driver executes one statement per
-     * call, so a semicolon inside a comment would otherwise cut the comment in
-     * half and leave its remainder to be parsed as SQL. Adequate for DDL, which
-     * has no string literals — it is not a general SQL parser.
-     */
-    static List<String> splitStatements(String script) {
-        String withoutComments = script.lines()
-                .map(line -> {
-                    int comment = line.indexOf("--");
-                    return comment < 0 ? line : line.substring(0, comment);
-                })
-                .collect(Collectors.joining("\n"));
-
-        return Arrays.stream(withoutComments.split(";"))
-                .map(String::strip)
-                .filter(statement -> !statement.isEmpty())
-                .toList();
+    private Connection connection() {
+        return database.connection();
     }
 
     public boolean hasFiling(String docId) {
         try (PreparedStatement statement =
-                     connection.prepareStatement("SELECT 1 FROM filing WHERE doc_id = ?")) {
+                     connection().prepareStatement("SELECT 1 FROM filing WHERE doc_id = ?")) {
             statement.setString(1, docId);
             try (ResultSet rs = statement.executeQuery()) {
                 return rs.next();
@@ -145,17 +71,18 @@ public final class CorpusStore implements AutoCloseable {
             insertFiling(filing);
             long[] blockIds = insertBlocks(filing.docId(), blocks);
             insertSentences(filing.docId(), blockIds, sentences);
-            connection.commit();
+            database.commit();
             log.debug("ingested {}: {} blocks, {} sentences",
                     filing.docId(), blocks.size(), sentences.size());
         } catch (SQLException e) {
-            rollback();
+            database.rollbackQuietly();
+            termIds.clear();
             throw new StoreException("cannot ingest filing " + filing.docId(), e);
         }
     }
 
     private void insertFiling(FilingRef filing) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
+        try (PreparedStatement statement = connection().prepareStatement("""
                 INSERT INTO filing (doc_id, edinet_code, filer_name, doc_type_code,
                                     ordinance_code, form_code, submit_date_time, ingested_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
@@ -173,7 +100,7 @@ public final class CorpusStore implements AutoCloseable {
 
     private long[] insertBlocks(String docId, List<NarrativeBlock> blocks) throws SQLException {
         long[] ids = new long[blocks.size()];
-        try (PreparedStatement statement = connection.prepareStatement(
+        try (PreparedStatement statement = connection().prepareStatement(
                 "INSERT INTO block (doc_id, seq, element_id, text) VALUES (?, ?, ?, ?)",
                 Statement.RETURN_GENERATED_KEYS)) {
 
@@ -193,11 +120,11 @@ public final class CorpusStore implements AutoCloseable {
     private void insertSentences(String docId, long[] blockIds, List<AnalysedSentence> sentences)
             throws SQLException {
 
-        try (PreparedStatement insertSentence = connection.prepareStatement("""
+        try (PreparedStatement insertSentence = connection().prepareStatement("""
                      INSERT INTO sentence (doc_id, block_id, seq, text, char_len, token_count)
                      VALUES (?, ?, ?, ?, ?, ?)
                      """, Statement.RETURN_GENERATED_KEYS);
-             PreparedStatement insertOccurrence = connection.prepareStatement("""
+             PreparedStatement insertOccurrence = connection().prepareStatement("""
                      INSERT INTO occurrence (term_id, sentence_id, doc_id, position)
                      VALUES (?, ?, ?, ?)
                      """)) {
@@ -235,7 +162,7 @@ public final class CorpusStore implements AutoCloseable {
         if (cached != null) {
             return cached;
         }
-        try (PreparedStatement statement = connection.prepareStatement("""
+        try (PreparedStatement statement = connection().prepareStatement("""
                 INSERT INTO term (key, surface, reading, pos) VALUES (?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET key = excluded.key
                 RETURNING id
@@ -262,30 +189,10 @@ public final class CorpusStore implements AutoCloseable {
         }
     }
 
-    private void rollback() {
-        try {
-            connection.rollback();
-        } catch (SQLException e) {
-            log.warn("rollback failed", e);
-        }
-        // Ids handed out inside the aborted transaction are gone.
-        termIds.clear();
-    }
-
     public CorpusStats stats() {
         return new CorpusStats(
-                count("filing"), count("block"), count("sentence"),
-                count("term"), count("occurrence"));
-    }
-
-    private long count(String table) {
-        try (Statement statement = connection.createStatement();
-             ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
-            rs.next();
-            return rs.getLong(1);
-        } catch (SQLException e) {
-            throw new StoreException("cannot count " + table, e);
-        }
+                database.count("filing"), database.count("block"), database.count("sentence"),
+                database.count("term"), database.count("occurrence"));
     }
 
     /**
@@ -293,10 +200,10 @@ public final class CorpusStore implements AutoCloseable {
      *
      * <p>The phase 1 exit criterion: this list should be dominated by 会社, 当社,
      * 事業 and similar at near-total document frequency. That is the correct and
-     * uninteresting result, and precisely the noise phase 2 keyness removes.
+     * uninteresting result.
      */
     public List<TermFrequency> topTermsByDocumentFrequency(int limit) {
-        try (PreparedStatement statement = connection.prepareStatement("""
+        try (PreparedStatement statement = connection().prepareStatement("""
                 SELECT t.key, t.pos, COUNT(*) AS corpus_freq,
                        COUNT(DISTINCT o.doc_id) AS doc_freq
                 FROM occurrence o
@@ -317,15 +224,6 @@ public final class CorpusStore implements AutoCloseable {
             }
         } catch (SQLException e) {
             throw new StoreException("cannot query term frequencies", e);
-        }
-    }
-
-    @Override
-    public void close() {
-        try {
-            connection.close();
-        } catch (SQLException e) {
-            throw new StoreException("cannot close corpus store", e);
         }
     }
 }

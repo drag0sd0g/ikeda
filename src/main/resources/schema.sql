@@ -68,6 +68,46 @@ CREATE TABLE IF NOT EXISTS occurrence (
     position    INTEGER NOT NULL
 );
 
+-- Words the learner already knows, from any source.
+--
+-- Kept separate from candidate.status so the two never overwrite each other: a
+-- verdict is what the reviewer said about one word at one moment, whereas this
+-- is a standing rule. Anki entries are loaded wholesale on the owner's
+-- instruction that everything carded is known; review entries accumulate as the
+-- reviewer works, and are what closes the gap no ranking can close.
+CREATE TABLE IF NOT EXISTS known_lemma (
+    lemma      TEXT PRIMARY KEY,
+    source     TEXT NOT NULL,
+    first_seen TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_known_lemma_source ON known_lemma(source);
+
+-- A term proposed for review, with its corpus counts snapshotted so an exported
+-- sheet stays meaningful even if the corpus is later re-ingested.
+--
+-- status is the reviewer's verdict. Re-populating candidates deliberately leaves
+-- it untouched: verdicts are expensive to produce and must survive a rebuild.
+--
+-- bccwj_rank is frequency rank in general written Japanese, 1 being commonest.
+-- It is the only feature that survived testing as a predictor of what the
+-- learner does not know (AUC 0.73); corpus frequency, document frequency, word
+-- length and register all failed. NULL means the word is absent from the
+-- baseline, which is usually a tokenisation mismatch on a compound rather than
+-- evidence of rarity, so it must not be treated as "infinitely rare".
+CREATE TABLE IF NOT EXISTS candidate (
+    term_id             INTEGER PRIMARY KEY REFERENCES term(id),
+    corpus_frequency    INTEGER NOT NULL,
+    document_frequency  INTEGER NOT NULL,
+    bccwj_rank          INTEGER,
+    example_sentence_id INTEGER REFERENCES sentence(id),
+    status              TEXT    NOT NULL DEFAULT 'PENDING',
+    decided_at          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_status ON candidate(status);
+CREATE INDEX IF NOT EXISTS idx_candidate_rank ON candidate(bccwj_rank);
+
 -- Covers corpus frequency and document frequency in one index scan.
 CREATE INDEX IF NOT EXISTS idx_occurrence_term_doc ON occurrence(term_id, doc_id);
 
