@@ -33,6 +33,7 @@ public final class Segmenter implements AutoCloseable {
     private final Dictionary dictionary;
     private final Tokenizer tokenizer;
     private final ProseFilter proseFilter;
+    private final ReadingResolver readings;
 
     public Segmenter(Path systemDictionary, ProseFilter proseFilter) {
         this.proseFilter = proseFilter;
@@ -40,6 +41,7 @@ public final class Segmenter implements AutoCloseable {
             this.dictionary = new DictionaryFactory()
                     .create(Config.defaultConfig().systemDictionary(systemDictionary));
             this.tokenizer = dictionary.create();
+            this.readings = new ReadingResolver(tokenizer);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot load Sudachi dictionary: " + systemDictionary, e);
         }
@@ -55,11 +57,11 @@ public final class Segmenter implements AutoCloseable {
     public record Sentence(int blockIndex, int seq, String elementId, String text,
                            List<Morpheme> morphemes) {
 
-        public AnalysedSentence analysed() {
+        public AnalysedSentence analysed(ReadingResolver readings) {
             List<TermOccurrence> terms = morphemes.stream()
                     .filter(Segmenter::isContentWord)
                     .map(m -> new TermOccurrence(
-                            m.normalizedForm(), m.surface(), m.readingForm(),
+                            m.normalizedForm(), m.surface(), readings.readingOf(m),
                             m.partOfSpeech().getFirst(), m.begin()))
                     .toList();
             return new AnalysedSentence(blockIndex, seq, elementId, text, morphemes.size(), terms);
@@ -79,11 +81,17 @@ public final class Segmenter implements AutoCloseable {
         }
     }
 
-    public record Segmentation(List<Sentence> sentences, SegmentationStats stats) {
+    public record Segmentation(List<Sentence> sentences, SegmentationStats stats,
+                               ReadingResolver readings) {
 
         public List<AnalysedSentence> analysed() {
-            return sentences.stream().map(Sentence::analysed).toList();
+            return sentences.stream().map(s -> s.analysed(readings)).toList();
         }
+    }
+
+    /** The resolver this segmenter uses, exposed for repairing stored readings. */
+    public ReadingResolver readings() {
+        return readings;
     }
 
     public Segmentation segment(List<NarrativeBlock> blocks) {
@@ -120,7 +128,7 @@ public final class Segmenter implements AutoCloseable {
 
         var stats = new SegmentationStats(blocks.size(), segments, prose, duplicates);
         log.debug("segmentation complete: {}", stats);
-        return new Segmentation(List.copyOf(sentences), stats);
+        return new Segmentation(List.copyOf(sentences), stats, readings);
     }
 
     /** Content words only: nouns, verbs, adjectives and adverbs, excluding numerals and pronouns. */

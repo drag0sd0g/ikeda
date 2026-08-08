@@ -1,5 +1,8 @@
 package com.ikeda.store;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -23,6 +26,8 @@ import java.util.stream.Collectors;
  * <p>Not thread safe: one connection, one writer.
  */
 public final class Database implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(Database.class);
 
     private static final String SCHEMA_RESOURCE = "/schema.sql";
 
@@ -64,6 +69,7 @@ public final class Database implements AutoCloseable {
     }
 
     private void applySchema() throws SQLException {
+        migrate();
         try (InputStream in = Database.class.getResourceAsStream(SCHEMA_RESOURCE)) {
             if (in == null) {
                 throw new IllegalStateException("missing resource " + SCHEMA_RESOURCE);
@@ -77,6 +83,59 @@ public final class Database implements AutoCloseable {
             connection.commit();
         } catch (IOException e) {
             throw new UncheckedIOException("cannot read " + SCHEMA_RESOURCE, e);
+        }
+    }
+
+    /**
+     * Brings an older database up to the current schema.
+     *
+     * <p>{@code CREATE TABLE IF NOT EXISTS} is a no-op on a table that already
+     * exists, so a column added to the schema never reaches a database created
+     * before it. Without this, opening an older file fails on the first statement
+     * that references the new column, with a message that gives no hint the file
+     * is simply out of date.
+     *
+     * <p>Deliberately minimal: columns only, added in place, no version table.
+     * The corpus can always be rebuilt from EDINET, so anything more involved
+     * than an {@code ADD COLUMN} should be handled by deleting the file and
+     * re-ingesting rather than by growing a migration framework here.
+     */
+    private void migrate() throws SQLException {
+        addColumnIfMissing("candidate", "bccwj_rank", "INTEGER");
+    }
+
+    private void addColumnIfMissing(String table, String column, String type)
+            throws SQLException {
+        if (!tableExists(table) || columnExists(table, column)) {
+            return;
+        }
+        try (Statement statement = connection.createStatement()) {
+            statement.executeUpdate(
+                    "ALTER TABLE %s ADD COLUMN %s %s".formatted(table, column, type));
+        }
+        connection.commit();
+        log.info("migrated: added {}.{}", table, column);
+    }
+
+    private boolean tableExists(String table) throws SQLException {
+        try (var statement = connection.prepareStatement(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")) {
+            statement.setString(1, table);
+            try (var rs = statement.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    private boolean columnExists(String table, String column) throws SQLException {
+        try (Statement statement = connection.createStatement();
+             var rs = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (rs.next()) {
+                if (column.equals(rs.getString("name"))) {
+                    return true;
+                }
+            }
+            return false;
         }
     }
 
