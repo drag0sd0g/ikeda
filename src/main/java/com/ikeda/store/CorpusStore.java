@@ -4,6 +4,7 @@ import com.ikeda.analyse.AnalysedSentence;
 import com.ikeda.analyse.TermOccurrence;
 import com.ikeda.ingest.FilingRef;
 import com.ikeda.ingest.NarrativeBlock;
+import com.ikeda.support.Scripts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -163,7 +164,8 @@ public final class CorpusStore {
             return cached;
         }
         try (PreparedStatement statement = connection().prepareStatement("""
-                INSERT INTO term (key, surface, reading, pos) VALUES (?, ?, ?, ?)
+                INSERT INTO term (key, surface, reading, pos, has_kanji)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET key = excluded.key
                 RETURNING id
                 """)) {
@@ -171,6 +173,7 @@ public final class CorpusStore {
             statement.setString(2, term.surface());
             statement.setString(3, term.reading());
             statement.setString(4, term.pos());
+            statement.setInt(5, Scripts.containsKanji(term.key()) ? 1 : 0);
             try (ResultSet rs = statement.executeQuery()) {
                 rs.next();
                 long id = rs.getLong(1);
@@ -189,55 +192,11 @@ public final class CorpusStore {
         }
     }
 
-    /**
-     * Recomputes stored readings for terms whose surface can inflect.
-     *
-     * <p>Readings persisted before the dictionary-form fix came from the inflected
-     * surface, so 晒す was stored as サラサ. Re-ingesting would also correct them,
-     * but that means re-fetching every filing at four seconds each; this repairs
-     * the affected rows in place.
-     *
-     * @param readingOf resolves the reading of a dictionary form
-     * @return how many rows changed
-     */
-    public int repairReadings(java.util.function.UnaryOperator<String> readingOf) {
-        record Repair(long id, String reading) { }
-        var repairs = new ArrayList<Repair>();
-
-        try {
-            try (PreparedStatement select = connection().prepareStatement(
-                    "SELECT id, key, reading FROM term WHERE pos IN ('動詞', '形容詞')");
-                 ResultSet rs = select.executeQuery()) {
-                while (rs.next()) {
-                    String corrected = readingOf.apply(rs.getString("key"));
-                    if (corrected != null && !corrected.equals(rs.getString("reading"))) {
-                        repairs.add(new Repair(rs.getLong("id"), corrected));
-                    }
-                }
-            }
-            try (PreparedStatement update = connection().prepareStatement(
-                    "UPDATE term SET reading = ? WHERE id = ?")) {
-                for (Repair repair : repairs) {
-                    update.setString(1, repair.reading());
-                    update.setLong(2, repair.id());
-                    update.addBatch();
-                }
-                update.executeBatch();
-            }
-            database.commit();
-        } catch (SQLException e) {
-            database.rollbackQuietly();
-            throw new StoreException("cannot repair readings", e);
-        }
-
-        log.info("repaired {} readings", repairs.size());
-        return repairs.size();
-    }
-
     public CorpusStats stats() {
         return new CorpusStats(
-                database.count("filing"), database.count("block"), database.count("sentence"),
-                database.count("term"), database.count("occurrence"));
+                database.count(Database.Table.FILING), database.count(Database.Table.BLOCK),
+                database.count(Database.Table.SENTENCE), database.count(Database.Table.TERM),
+                database.count(Database.Table.OCCURRENCE));
     }
 
     /**

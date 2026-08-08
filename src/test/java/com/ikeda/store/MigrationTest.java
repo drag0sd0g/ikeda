@@ -45,10 +45,40 @@ class MigrationTest {
         assertThat(columnsOf(file)).doesNotContain("bccwj_rank");
 
         try (Database database = Database.open(file)) {
-            assertThat(database.count("candidate")).isZero();
+            assertThat(database.count(Database.Table.CANDIDATE)).isZero();
         }
 
         assertThat(columnsOf(file)).contains("bccwj_rank");
+    }
+
+    @Test
+    @DisplayName("backfills has_kanji, so kana-only terms do not become candidates")
+    void backfillsScriptClassification() throws Exception {
+        Path file = dir.resolve("stale.db");
+        try (Connection raw = DriverManager.getConnection("jdbc:sqlite:" + file);
+             Statement statement = raw.createStatement()) {
+            statement.executeUpdate("""
+                    CREATE TABLE term (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE,
+                                       surface TEXT NOT NULL, reading TEXT, pos TEXT)
+                    """);
+            statement.executeUpdate(
+                    "INSERT INTO term VALUES (1, '蓋然性', '蓋然性', 'ガイゼンセイ', '名詞')");
+            statement.executeUpdate(
+                    "INSERT INTO term VALUES (2, 'こと', 'こと', 'コト', '名詞')");
+        }
+
+        try (Database database = Database.open(file)) {
+            assertThat(database.count(Database.Table.TERM)).isEqualTo(2);
+        }
+
+        try (Connection raw = DriverManager.getConnection("jdbc:sqlite:" + file);
+             Statement statement = raw.createStatement();
+             var rs = statement.executeQuery("SELECT key, has_kanji FROM term ORDER BY id")) {
+            rs.next();
+            assertThat(rs.getInt("has_kanji")).isOne();      // 蓋然性
+            rs.next();
+            assertThat(rs.getInt("has_kanji")).isZero();     // こと
+        }
     }
 
     @Test
@@ -63,7 +93,7 @@ class MigrationTest {
         }
 
         try (Database database = Database.open(file)) {
-            assertThat(database.count("candidate")).isEqualTo(1);
+            assertThat(database.count(Database.Table.CANDIDATE)).isEqualTo(1);
         }
     }
 
@@ -72,10 +102,10 @@ class MigrationTest {
     void isIdempotent() throws Exception {
         Path file = dir.resolve("current.db");
         try (Database database = Database.open(file)) {
-            assertThat(database.count("candidate")).isZero();
+            assertThat(database.count(Database.Table.CANDIDATE)).isZero();
         }
         try (Database database = Database.open(file)) {
-            assertThat(database.count("candidate")).isZero();
+            assertThat(database.count(Database.Table.CANDIDATE)).isZero();
         }
         assertThat(columnsOf(file)).contains("bccwj_rank");
     }

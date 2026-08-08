@@ -2,7 +2,6 @@ package com.ikeda.store;
 
 import com.ikeda.review.Candidate;
 import com.ikeda.review.CandidateStatus;
-import com.ikeda.support.Scripts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +63,7 @@ public final class ReviewStore {
      * @return how many were newly added
      */
     public int addKnown(Collection<String> lemmas, String source) {
-        long before = database.count("known_lemma");
+        long before = database.count(Database.Table.KNOWN_LEMMA);
         try (PreparedStatement statement = database.connection().prepareStatement("""
                 INSERT INTO known_lemma (lemma, source, first_seen)
                 VALUES (?, ?, datetime('now'))
@@ -81,14 +80,14 @@ public final class ReviewStore {
             database.rollbackQuietly();
             throw new StoreException("cannot add known lemmas", e);
         }
-        long added = database.count("known_lemma") - before;
+        long added = database.count(Database.Table.KNOWN_LEMMA) - before;
         log.info("known lemmas: +{} from {} ({} supplied, {} total)",
-                added, source, lemmas.size(), database.count("known_lemma"));
+                added, source, lemmas.size(), database.count(Database.Table.KNOWN_LEMMA));
         return (int) added;
     }
 
     public long knownCount() {
-        return database.count("known_lemma");
+        return database.count(Database.Table.KNOWN_LEMMA);
     }
 
     // --- candidates -----------------------------------------------------
@@ -119,6 +118,7 @@ public final class ReviewStore {
                         FROM occurrence o
                         JOIN term t ON t.id = o.term_id
                         WHERE t.pos IN %s
+                          AND t.has_kanji = 1
                           AND LENGTH(t.key) >= ?
                           AND t.key NOT IN (SELECT lemma FROM known_lemma)
                         GROUP BY o.term_id
@@ -157,7 +157,6 @@ public final class ReviewStore {
                 statement.executeUpdate();
             }
 
-            removeKanaOnly();
             assignRanks(baselineRank);
             database.commit();
 
@@ -166,75 +165,40 @@ public final class ReviewStore {
             throw new StoreException("cannot populate candidates", e);
         }
 
-        int total = (int) database.count("candidate");
+        int total = (int) database.count(Database.Table.CANDIDATE);
         log.info("candidates: {} at document frequency >= {}", total, minDocumentFrequency);
         return total;
     }
 
-    /**
-     * Drops undecided candidates written entirely in kana.
-     *
-     * <p>Done in Java rather than SQL because SQLite has no character-class
-     * matching for CJK. See {@link Scripts#containsKanji} for the evidence.
-     */
-    private void removeKanaOnly() throws SQLException {
-        var doomed = new ArrayList<Long>();
-        try (PreparedStatement select = database.connection().prepareStatement("""
-                SELECT c.term_id, t.key FROM candidate c
-                JOIN term t ON t.id = c.term_id
-                WHERE c.status = 'PENDING'
-                """);
-             ResultSet rs = select.executeQuery()) {
-            while (rs.next()) {
-                if (!Scripts.containsKanji(rs.getString(2))) {
-                    doomed.add(rs.getLong(1));
-                }
-            }
-        }
-        if (doomed.isEmpty()) {
-            return;
-        }
-        try (PreparedStatement delete = database.connection().prepareStatement(
-                "DELETE FROM candidate WHERE term_id = ?")) {
-            for (long termId : doomed) {
-                delete.setLong(1, termId);
-                delete.addBatch();
-            }
-            delete.executeBatch();
-        }
-        log.info("dropped {} kana-only candidates", doomed.size());
-    }
+    private record TermKey(long termId, String lemma) { }
 
     private void assignRanks(Function<String, Integer> baselineRank) throws SQLException {
-        List<long[]> ids = new ArrayList<>();
-        var keys = new ArrayList<String>();
-
+        var terms = new ArrayList<TermKey>();
         try (PreparedStatement select = database.connection().prepareStatement(
                 "SELECT c.term_id, t.key FROM candidate c JOIN term t ON t.id = c.term_id");
              ResultSet rs = select.executeQuery()) {
             while (rs.next()) {
-                ids.add(new long[]{rs.getLong(1)});
-                keys.add(rs.getString(2));
+                terms.add(new TermKey(rs.getLong("term_id"), rs.getString("key")));
             }
         }
 
         int scored = 0;
         try (PreparedStatement update = database.connection().prepareStatement(
                 "UPDATE candidate SET bccwj_rank = ? WHERE term_id = ?")) {
-            for (int i = 0; i < ids.size(); i++) {
-                Integer rank = baselineRank.apply(keys.get(i));
+            for (TermKey term : terms) {
+                Integer rank = baselineRank.apply(term.lemma());
                 if (rank == null) {
                     update.setNull(1, Types.INTEGER);
                 } else {
                     update.setInt(1, rank);
                     scored++;
                 }
-                update.setLong(2, ids.get(i)[0]);
+                update.setLong(2, term.termId());
                 update.addBatch();
             }
             update.executeBatch();
         }
-        log.info("baseline ranks: {} of {} candidates scored", scored, ids.size());
+        log.info("baseline ranks: {} of {} candidates scored", scored, terms.size());
     }
 
     /**

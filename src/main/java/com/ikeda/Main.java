@@ -36,7 +36,6 @@ import java.util.function.Function;
  * <pre>
  *   ingest &lt;date&gt; [limit]      fetch, segment and store filings
  *   anki                        load the Anki collection into the known set
- *   repair-readings             recompute readings stored before the inflection fix
  *   sample [size] [out.tsv]     write the next review batch, rarest first
  *   export [out.tsv]            write every decided candidate
  *   verdicts &lt;in.tsv&gt;         read a reviewed sheet back
@@ -53,7 +52,7 @@ public class Main {
 
     private static final Path SYSTEM_DICTIONARY = Path.of("dict/system_core.dic");
     private static final Path DATABASE = Path.of("ikeda.db");
-    private static final Path DEFAULT_SHEET = Path.of("review.tsv");
+    private static final Path DEFAULT_SHEET = Path.of("review_batch1.tsv");
     private static final Path BASELINE =
             Path.of("baseline/BCCWJ_frequencylist_suw_ver1_0.tsv");
 
@@ -72,14 +71,13 @@ public class Main {
             switch (command) {
                 case "ingest" -> ingest(database, rest);
                 case "anki" -> anki(database);
-                case "repair-readings" -> repairReadings(database);
                 case "sample" -> sample(database, rest);
                 case "export" -> export(database, rest);
                 case "verdicts" -> verdicts(database, rest);
                 case "status" -> status(database);
                 default -> throw new IllegalArgumentException(
-                        ("unknown command '%s' — try ingest, anki, sample, export, "
-                                + "verdicts, repair-readings or status").formatted(command));
+                        ("unknown command '%s' — try ingest, anki, sample, "
+                                + "export, verdicts or status").formatted(command));
             }
         }
     }
@@ -153,21 +151,6 @@ public class Main {
         var review = new ReviewStore(database);
         review.addKnown(anki.headwords(), "anki");
         log.info("known set now holds {} lemmas", review.knownCount());
-    }
-
-    /**
-     * Corrects readings persisted before inflected forms were handled.
-     *
-     * <p>A one-off for existing databases: new ingestion already stores the
-     * dictionary form's reading.
-     */
-    private static void repairReadings(Database database) {
-        try (var segmenter = new Segmenter(SYSTEM_DICTIONARY, ProseFilter.CORPUS)) {
-            var resolver = segmenter.readings();
-            int repaired = new CorpusStore(database)
-                    .repairReadings(resolver::readingOfForm);
-            log.info("{} readings corrected", repaired);
-        }
     }
 
     private static void sample(Database database, String[] args) {

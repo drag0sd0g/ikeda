@@ -50,12 +50,18 @@ CREATE TABLE IF NOT EXISTS sentence (
 -- normalised form. Surface and reading are representative rather than
 -- authoritative: a key can occur with several readings, and phase 3 will need
 -- to resolve that before a reading reaches a card.
+-- has_kanji is stored rather than tested at query time because SQLite has no
+-- character-class matching for CJK. Terms written entirely in kana are never
+-- candidates: katakana is English loanwords the learner reads for free, and
+-- kana-only content words are grammatical scaffolding whose baseline ranks are
+-- wrong. See Scripts.containsKanji for the measurements.
 CREATE TABLE IF NOT EXISTS term (
-    id      INTEGER PRIMARY KEY,
-    key     TEXT NOT NULL UNIQUE,
-    surface TEXT NOT NULL,
-    reading TEXT,
-    pos     TEXT
+    id        INTEGER PRIMARY KEY,
+    key       TEXT NOT NULL UNIQUE,
+    surface   TEXT NOT NULL,
+    reading   TEXT,
+    pos       TEXT,
+    has_kanji INTEGER NOT NULL DEFAULT 1
 );
 
 -- doc_id is denormalised from sentence because document frequency is

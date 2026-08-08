@@ -1,5 +1,6 @@
 package com.ikeda.store;
 
+import com.ikeda.support.Scripts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,12 +103,45 @@ public final class Database implements AutoCloseable {
      */
     private void migrate() throws SQLException {
         addColumnIfMissing("candidate", "bccwj_rank", "INTEGER");
+        if (addColumnIfMissing("term", "has_kanji", "INTEGER NOT NULL DEFAULT 1")) {
+            backfillHasKanji();
+        }
     }
 
-    private void addColumnIfMissing(String table, String column, String type)
+    /**
+     * Fills in {@code term.has_kanji} for rows that predate the column.
+     *
+     * <p>Runs once, immediately after the column is added. The default of 1 would
+     * otherwise leave every existing kana-only term eligible as a candidate.
+     */
+    private void backfillHasKanji() throws SQLException {
+        record Term(long id, boolean hasKanji) { }
+        var terms = new java.util.ArrayList<Term>();
+
+        try (Statement statement = connection.createStatement();
+             var rs = statement.executeQuery("SELECT id, key FROM term")) {
+            while (rs.next()) {
+                terms.add(new Term(rs.getLong("id"), Scripts.containsKanji(rs.getString("key"))));
+            }
+        }
+        try (var update = connection.prepareStatement(
+                "UPDATE term SET has_kanji = ? WHERE id = ?")) {
+            for (Term term : terms) {
+                update.setInt(1, term.hasKanji() ? 1 : 0);
+                update.setLong(2, term.id());
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+        connection.commit();
+        log.info("migrated: classified {} terms by script", terms.size());
+    }
+
+    /** @return true when the column was actually added */
+    private boolean addColumnIfMissing(String table, String column, String type)
             throws SQLException {
         if (!tableExists(table) || columnExists(table, column)) {
-            return;
+            return false;
         }
         try (Statement statement = connection.createStatement()) {
             statement.executeUpdate(
@@ -115,6 +149,7 @@ public final class Database implements AutoCloseable {
         }
         connection.commit();
         log.info("migrated: added {}.{}", table, column);
+        return true;
     }
 
     private boolean tableExists(String table) throws SQLException {
@@ -177,13 +212,31 @@ public final class Database implements AutoCloseable {
         }
     }
 
-    long count(String table) {
+    /**
+     * The tables {@link #count(Table)} may read.
+     *
+     * <p>An enum rather than a string because a table name cannot be bound as a
+     * parameter and so has to be interpolated. Restricting the input to a closed
+     * set keeps that safe by construction rather than by convention.
+     */
+    public enum Table {
+        FILING("filing"), BLOCK("block"), SENTENCE("sentence"), TERM("term"),
+        OCCURRENCE("occurrence"), CANDIDATE("candidate"), KNOWN_LEMMA("known_lemma");
+
+        private final String name;
+
+        Table(String name) {
+            this.name = name;
+        }
+    }
+
+    long count(Table table) {
         try (Statement statement = connection.createStatement();
-             var rs = statement.executeQuery("SELECT COUNT(*) FROM " + table)) {
+             var rs = statement.executeQuery("SELECT COUNT(*) FROM " + table.name)) {
             rs.next();
             return rs.getLong(1);
         } catch (SQLException e) {
-            throw new StoreException("cannot count " + table, e);
+            throw new StoreException("cannot count " + table.name, e);
         }
     }
 
