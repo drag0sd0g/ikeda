@@ -130,14 +130,13 @@ class SegmenterTest {
     }
 
     @Test
-    @DisplayName("contentWords keeps nouns and verbs, drops particles and numerals")
+    @DisplayName("keeps content words and drops particles and numerals")
     void filtersContentWords() {
         var block = new NarrativeBlock("jpcrp_cor:BusinessRisksTextBlock",
                 "当社は令和8年に事業を拡大しております。");
 
-        var result = segmenter.segment(List.of(block));
-        List<String> content = Segmenter.contentWords(result.sentences().getFirst().morphemes())
-                .stream().map(Morpheme::surface).toList();
+        List<String> content = segmenter.segment(List.of(block)).analysed().getFirst().terms()
+                .stream().map(TermOccurrence::surface).toList();
 
         assertThat(content).contains("事業", "拡大");
         assertThat(content).doesNotContain("は", "を", "に", "8");

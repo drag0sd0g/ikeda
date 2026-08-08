@@ -12,9 +12,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDate;
 
-/** Thin transport over the EDINET v2 API. Performs no parsing. */
 public final class EdinetApi {
-
     private static final Logger log = LoggerFactory.getLogger(EdinetApi.class);
 
     private static final String BASE_URL = "https://api.edinet-fsa.go.jp/api/v2";
@@ -33,7 +31,6 @@ public final class EdinetApi {
         this.rateLimiter = rateLimiter;
     }
 
-    /** Production wiring: real HTTP client, EDINET's documented request spacing. */
     public static EdinetApi withDefaults(String apiKey) {
         return new EdinetApi(apiKey,
                 HttpClient.newHttpClient(),

@@ -1,6 +1,5 @@
 package com.ikeda.ingest;
 
-/** A single filing as advertised by the EDINET document listing. */
 public record FilingRef(
         String docId,
         String edinetCode,

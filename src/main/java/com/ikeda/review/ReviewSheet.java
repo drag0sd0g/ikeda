@@ -5,19 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * The review sheet: tab-separated text, written for a spreadsheet and read back.
- *
- * <p>A file round trip rather than a user interface, because the reviewer's tool
- * of choice already exists and sorts, filters and hides columns better than
- * anything worth building here.
- *
- * <p>Pure: strings in, strings out, no file or database access, so the parsing
- * rules are testable directly.
- */
 public final class ReviewSheet {
-
-    /** The column the reviewer fills in. Deliberately first, so it is easy to reach. */
     static final String VERDICT_COLUMN = "verdict";
     private static final String TERM_COLUMN = "term";
 
@@ -45,15 +33,6 @@ public final class ReviewSheet {
         return out.toString();
     }
 
-    /**
-     * Reads verdicts back, keyed by term.
-     *
-     * <p>Rows left blank are skipped rather than reset, so a partly reviewed sheet
-     * can be imported without discarding the rest.
-     *
-     * @throws IllegalArgumentException if the header is not the one written, or a
-     *                                  verdict cell cannot be understood
-     */
     public static Map<String, CandidateStatus> readVerdicts(String tsv) {
         List<String> lines = tsv.lines().filter(line -> !line.isBlank()).toList();
         if (lines.isEmpty()) {
@@ -95,12 +74,10 @@ public final class ReviewSheet {
         };
     }
 
-    /** Tabs and newlines would break the row; nothing else needs escaping. */
     private static String clean(String value) {
         return value == null ? "" : value.replace('\t', ' ').replace('\n', ' ').strip();
     }
 
-    /** A short reminder printed alongside the sheet, so the codes need no lookup. */
     public static List<String> instructions() {
         var lines = new ArrayList<String>();
         lines.add("Fill the 'verdict' column for each row:");

@@ -10,9 +10,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Lists filings and selects them by genre. */
 public final class EdinetCatalogue {
-
     private static final Logger log = LoggerFactory.getLogger(EdinetCatalogue.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -30,7 +28,6 @@ public final class EdinetCatalogue {
         return selected;
     }
 
-    /** Parses a listing response. Package-private and pure, so it is testable from a fixture. */
     static List<FilingRef> parse(byte[] json) {
         try {
             JsonNode root = MAPPER.readTree(json);

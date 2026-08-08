@@ -18,16 +18,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * Segments narrative blocks into prose sentences, tokenised in Sudachi mode C.
- *
- * <p>Deduplicates within a filing: 15–23% of extracted sentences are exact
- * repeats, because consolidated (連結) and non-consolidated (個別) contexts carry
- * the same text under the same element. Left in place they inflate corpus
- * frequency without touching document frequency, which distorts keyness.
- */
 public final class Segmenter implements AutoCloseable {
-
     private static final Logger log = LoggerFactory.getLogger(Segmenter.class);
 
     private final Dictionary dictionary;
@@ -47,16 +38,8 @@ public final class Segmenter implements AutoCloseable {
         }
     }
 
-    /**
-     * One sentence of prose with its morphemes, already tokenised in mode C.
-     *
-     * <p>Morphemes are retained because phase 2 compound reconstruction needs the
-     * token sequence. {@link #analysed()} projects to the Sudachi-free form the
-     * store consumes.
-     */
     public record Sentence(int blockIndex, int seq, String elementId, String text,
                            List<Morpheme> morphemes) {
-
         public AnalysedSentence analysed(ReadingResolver readings) {
             List<TermOccurrence> terms = morphemes.stream()
                     .filter(Segmenter::isContentWord)
@@ -69,7 +52,6 @@ public final class Segmenter implements AutoCloseable {
     }
 
     public record SegmentationStats(int blocks, int segments, int prose, int duplicates) {
-
         public int kept() {
             return prose - duplicates;
         }
@@ -83,13 +65,11 @@ public final class Segmenter implements AutoCloseable {
 
     public record Segmentation(List<Sentence> sentences, SegmentationStats stats,
                                ReadingResolver readings) {
-
         public List<AnalysedSentence> analysed() {
             return sentences.stream().map(s -> s.analysed(readings)).toList();
         }
     }
 
-    /** The resolver this segmenter uses, exposed for repairing stored readings. */
     public ReadingResolver readings() {
         return readings;
     }
@@ -131,17 +111,11 @@ public final class Segmenter implements AutoCloseable {
         return new Segmentation(List.copyOf(sentences), stats, readings);
     }
 
-    /** Content words only: nouns, verbs, adjectives and adverbs, excluding numerals and pronouns. */
-    public static List<Morpheme> contentWords(List<Morpheme> morphemes) {
-        return morphemes.stream().filter(Segmenter::isContentWord).toList();
-    }
-
-    static final Set<String> CONTENT_POS = Set.of("名詞", "動詞", "形容詞", "副詞");
-    static final Set<String> EXCLUDED_SUBPOS = Set.of("数詞", "代名詞", "固有名詞");
+    private static final Set<String> EXCLUDED_SUBPOS = Set.of("数詞", "代名詞", "固有名詞");
 
     public static boolean isContentWord(Morpheme morpheme) {
         List<String> pos = morpheme.partOfSpeech();
-        return CONTENT_POS.contains(pos.getFirst())
+        return PartOfSpeech.isContent(pos.getFirst())
                 && (pos.size() < 2 || !EXCLUDED_SUBPOS.contains(pos.get(1)));
     }
 

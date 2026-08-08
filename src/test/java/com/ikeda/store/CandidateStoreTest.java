@@ -13,25 +13,32 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.Optional;
+import com.ikeda.rank.BaselineRanking;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class ReviewStoreTest {
+class CandidateStoreTest {
 
     /** No baseline available: every candidate is unscored. */
-    private static final Function<String, Integer> NO_RANKS = lemma -> null;
+    private static final BaselineRanking NO_RANKS = BaselineRanking.NONE;
+
+    private static BaselineRanking ranking(Map<String, Integer> ranks) {
+        return lemma -> Optional.ofNullable(ranks.get(lemma));
+    }
 
     private Database database;
     private CorpusStore corpus;
-    private ReviewStore review;
+    private CandidateStore candidates;
+    private KnownLemmaStore known;
 
     @BeforeEach
     void setUp() {
         database = Database.inMemory();
         corpus = new CorpusStore(database);
-        review = new ReviewStore(database);
+        candidates = new CandidateStore(database);
+        known = new KnownLemmaStore(database);
     }
 
     @AfterEach
@@ -48,9 +55,9 @@ class ReviewStoreTest {
         ingestAcross(5, "蓋然性");
         ingestAcross(1, "独自語");
 
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.nextBatch(100))
+        assertThat(candidates.nextBatch(100))
                 .extracting(Candidate::key)
                 .containsExactly("蓋然性");
     }
@@ -60,9 +67,9 @@ class ReviewStoreTest {
     void excludesSingleCharacterTerms() {
         ingestAcross(5, "蓋然性", "円");
 
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.nextBatch(100))
+        assertThat(candidates.nextBatch(100))
                 .extracting(Candidate::key)
                 .containsExactly("蓋然性");
     }
@@ -71,9 +78,9 @@ class ReviewStoreTest {
     @DisplayName("attaches an example sentence from a real filing")
     void attachesExample() {
         ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.nextBatch(100).getFirst().example())
+        assertThat(candidates.nextBatch(100).getFirst().example())
                 .isNotNull()
                 .contains("蓋然性");
     }
@@ -82,9 +89,9 @@ class ReviewStoreTest {
     @DisplayName("carries corpus and document frequency onto the candidate")
     void carriesFrequencies() {
         ingestAcross(4, "蓋然性");
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        Candidate candidate = review.nextBatch(100).getFirst();
+        Candidate candidate = candidates.nextBatch(100).getFirst();
 
         assertThat(candidate.documentFrequency()).isEqualTo(4);
         assertThat(candidate.corpusFrequency()).isEqualTo(4);
@@ -94,22 +101,22 @@ class ReviewStoreTest {
     @DisplayName("records a verdict and removes the candidate from pending")
     void recordsVerdict() {
         ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        int updated = review.recordVerdicts(Map.of("蓋然性", CandidateStatus.WORTH_LEARNING));
+        int updated = candidates.recordVerdicts(Map.of("蓋然性", CandidateStatus.WORTH_LEARNING));
 
         assertThat(updated).isEqualTo(1);
-        assertThat(review.nextBatch(100)).isEmpty();
-        assertThat(review.verdictCounts().get(CandidateStatus.WORTH_LEARNING)).isEqualTo(1);
+        assertThat(candidates.nextBatch(100)).isEmpty();
+        assertThat(candidates.verdictCounts().get(CandidateStatus.WORTH_LEARNING)).isEqualTo(1);
     }
 
     @Test
     @DisplayName("ignores verdicts for terms that are not candidates")
     void ignoresUnknownTerms() {
         ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        int updated = review.recordVerdicts(Map.of("存在しない語", CandidateStatus.KNOWN));
+        int updated = candidates.recordVerdicts(Map.of("存在しない語", CandidateStatus.KNOWN));
 
         assertThat(updated).isZero();
     }
@@ -118,26 +125,26 @@ class ReviewStoreTest {
     @DisplayName("re-populating preserves verdicts, because they are expensive to produce")
     void preservesVerdictsOnRepopulate() {
         ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
-        review.recordVerdicts(Map.of("蓋然性", CandidateStatus.KNOWN));
+        candidates.populate(3, NO_RANKS);
+        candidates.recordVerdicts(Map.of("蓋然性", CandidateStatus.KNOWN));
 
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.verdictCounts().get(CandidateStatus.KNOWN)).isEqualTo(1);
-        assertThat(review.nextBatch(100)).isEmpty();
+        assertThat(candidates.verdictCounts().get(CandidateStatus.KNOWN)).isEqualTo(1);
+        assertThat(candidates.nextBatch(100)).isEmpty();
     }
 
     @Test
     @DisplayName("re-populating refreshes counts after more filings arrive")
     void refreshesCountsOnRepopulate() {
         ingestAcross(4, "蓋然性");
-        review.populate(3, NO_RANKS);
-        assertThat(review.nextBatch(100).getFirst().documentFrequency()).isEqualTo(4);
+        candidates.populate(3, NO_RANKS);
+        assertThat(candidates.nextBatch(100).getFirst().documentFrequency()).isEqualTo(4);
 
         ingestAcross(3, "蓋然性");   // three more filings
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.nextBatch(100).getFirst().documentFrequency()).isEqualTo(7);
+        assertThat(candidates.nextBatch(100).getFirst().documentFrequency()).isEqualTo(7);
     }
 
     @Test
@@ -145,9 +152,9 @@ class ReviewStoreTest {
     void ordersBatchByRarity() {
         ingestAcross(5, "普通の語");
         ingestAcross(5, "珍しい語");
-        review.populate(3, Map.of("普通の語", 500, "珍しい語", 40000)::get);
+        candidates.populate(3, ranking(Map.of("普通の語", 500, "珍しい語", 40000)));
 
-        assertThat(review.nextBatch(10))
+        assertThat(candidates.nextBatch(10))
                 .extracting(Candidate::key)
                 .containsExactly("珍しい語", "普通の語");
     }
@@ -159,9 +166,9 @@ class ReviewStoreTest {
         // and such words proved 74% already known — so they must not lead.
         ingestAcross(5, "既知語");
         ingestAcross(5, "対象外語");
-        review.populate(3, Map.of("既知語", 9000)::get);
+        candidates.populate(3, ranking(Map.of("既知語", 9000)));
 
-        assertThat(review.nextBatch(10))
+        assertThat(candidates.nextBatch(10))
                 .extracting(Candidate::key)
                 .containsExactly("既知語", "対象外語");
     }
@@ -170,9 +177,9 @@ class ReviewStoreTest {
     @DisplayName("counts every status, including those with no candidates")
     void countsAllStatuses() {
         ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.verdictCounts())
+        assertThat(candidates.verdictCounts())
                 .containsEntry(CandidateStatus.PENDING, 1L)
                 .containsEntry(CandidateStatus.KNOWN, 0L)
                 .containsEntry(CandidateStatus.WORTH_LEARNING, 0L)
@@ -184,11 +191,11 @@ class ReviewStoreTest {
     void excludesKnownLemmas() {
         ingestAcross(5, "蓋然性");
         ingestAcross(5, "既知語");
-        review.addKnown(List.of("既知語"), "anki");
+        known.add(List.of("既知語"), "anki");
 
-        review.populate(3, NO_RANKS);
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.nextBatch(10))
+        assertThat(candidates.nextBatch(10))
                 .extracting(Candidate::key)
                 .containsExactly("蓋然性");
     }
@@ -197,43 +204,21 @@ class ReviewStoreTest {
     @DisplayName("drops a pending candidate once the known set catches up with it")
     void dropsCandidateThatBecomesKnown() {
         ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
-        assertThat(review.nextBatch(10)).hasSize(1);
+        candidates.populate(3, NO_RANKS);
+        assertThat(candidates.nextBatch(10)).hasSize(1);
 
-        review.addKnown(List.of("蓋然性"), "anki");
-        review.populate(3, NO_RANKS);
+        known.add(List.of("蓋然性"), "anki");
+        candidates.populate(3, NO_RANKS);
 
-        assertThat(review.nextBatch(10)).isEmpty();
-    }
-
-    @Test
-    @DisplayName("a 'known' verdict promotes the word into the known set")
-    void knownVerdictBecomesKnownLemma() {
-        ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
-
-        review.recordVerdicts(Map.of("蓋然性", CandidateStatus.KNOWN));
-
-        assertThat(review.knownCount()).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("a 'worth learning' verdict does not make the word known")
-    void worthVerdictDoesNotBecomeKnown() {
-        ingestAcross(5, "蓋然性");
-        review.populate(3, NO_RANKS);
-
-        review.recordVerdicts(Map.of("蓋然性", CandidateStatus.WORTH_LEARNING));
-
-        assertThat(review.knownCount()).isZero();
+        assertThat(candidates.nextBatch(10)).isEmpty();
     }
 
     @Test
     @DisplayName("adding known lemmas twice is idempotent")
     void addKnownIsIdempotent() {
-        assertThat(review.addKnown(List.of("語A", "語B"), "anki")).isEqualTo(2);
-        assertThat(review.addKnown(List.of("語A", "語B"), "review")).isZero();
-        assertThat(review.knownCount()).isEqualTo(2);
+        assertThat(known.add(List.of("語A", "語B"), "anki")).isEqualTo(2);
+        assertThat(known.add(List.of("語A", "語B"), "review")).isZero();
+        assertThat(known.count()).isEqualTo(2);
     }
 
     // --- fixtures -------------------------------------------------------

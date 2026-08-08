@@ -12,22 +12,14 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Owns the SQLite connection and the schema.
- *
- * <p>Separated from the stores because there is now more than one: {@link CorpusStore}
- * writes the corpus, {@link ReviewStore} manages candidates and verdicts, and both
- * need the same connection and the same transaction boundary.
- *
- * <p>Not thread safe: one connection, one writer.
- */
 public final class Database implements AutoCloseable {
-
     private static final Logger log = LoggerFactory.getLogger(Database.class);
 
     private static final String SCHEMA_RESOURCE = "/schema.sql";
@@ -48,7 +40,6 @@ public final class Database implements AutoCloseable {
         return new Database("jdbc:sqlite:" + path);
     }
 
-    /** For tests: a private database that never touches disk. */
     public static Database inMemory() {
         return new Database("jdbc:sqlite::memory:");
     }
@@ -59,10 +50,8 @@ public final class Database implements AutoCloseable {
 
     private void configure() throws SQLException {
         try (Statement statement = connection.createStatement()) {
-            // SQLite leaves foreign keys unenforced unless asked, per connection.
             statement.execute("PRAGMA foreign_keys = ON");
-            // WAL plus NORMAL avoids a disk sync per transaction. Silently ignored
-            // for in-memory databases, which have no journal to speak of.
+
             statement.execute("PRAGMA journal_mode = WAL");
             statement.execute("PRAGMA synchronous = NORMAL");
         }
@@ -87,20 +76,6 @@ public final class Database implements AutoCloseable {
         }
     }
 
-    /**
-     * Brings an older database up to the current schema.
-     *
-     * <p>{@code CREATE TABLE IF NOT EXISTS} is a no-op on a table that already
-     * exists, so a column added to the schema never reaches a database created
-     * before it. Without this, opening an older file fails on the first statement
-     * that references the new column, with a message that gives no hint the file
-     * is simply out of date.
-     *
-     * <p>Deliberately minimal: columns only, added in place, no version table.
-     * The corpus can always be rebuilt from EDINET, so anything more involved
-     * than an {@code ADD COLUMN} should be handled by deleting the file and
-     * re-ingesting rather than by growing a migration framework here.
-     */
     private void migrate() throws SQLException {
         addColumnIfMissing("candidate", "bccwj_rank", "INTEGER");
         if (addColumnIfMissing("term", "has_kanji", "INTEGER NOT NULL DEFAULT 1")) {
@@ -108,12 +83,6 @@ public final class Database implements AutoCloseable {
         }
     }
 
-    /**
-     * Fills in {@code term.has_kanji} for rows that predate the column.
-     *
-     * <p>Runs once, immediately after the column is added. The default of 1 would
-     * otherwise leave every existing kana-only term eligible as a candidate.
-     */
     private void backfillHasKanji() throws SQLException {
         record Term(long id, boolean hasKanji) { }
         var terms = new java.util.ArrayList<Term>();
@@ -137,7 +106,6 @@ public final class Database implements AutoCloseable {
         log.info("migrated: classified {} terms by script", terms.size());
     }
 
-    /** @return true when the column was actually added */
     private boolean addColumnIfMissing(String table, String column, String type)
             throws SQLException {
         if (!tableExists(table) || columnExists(table, column)) {
@@ -174,14 +142,6 @@ public final class Database implements AutoCloseable {
         }
     }
 
-    /**
-     * Splits a DDL script into statements.
-     *
-     * <p>Line comments are stripped first: the driver executes one statement per
-     * call, so a semicolon inside a comment would otherwise cut the comment in
-     * half and leave its remainder to be parsed as SQL. Adequate for DDL, which
-     * has no string literals — it is not a general SQL parser.
-     */
     static List<String> splitStatements(String script) {
         String withoutComments = script.lines()
                 .map(line -> {
@@ -196,6 +156,42 @@ public final class Database implements AutoCloseable {
                 .toList();
     }
 
+    <T> List<T> query(String sql, Sql.Binder binder, Sql.RowMapper<T> mapper) {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            try (ResultSet rows = statement.executeQuery()) {
+                var results = new java.util.ArrayList<T>();
+                while (rows.next()) {
+                    results.add(mapper.map(rows));
+                }
+                return List.copyOf(results);
+            }
+        } catch (SQLException e) {
+            throw new StoreException("query failed: " + summarise(sql), e);
+        }
+    }
+
+    <T> java.util.Optional<T> queryOne(String sql, Sql.Binder binder, Sql.RowMapper<T> mapper) {
+        return query(sql, binder, mapper).stream().findFirst();
+    }
+
+    boolean exists(String sql, Sql.Binder binder) {
+        return !query(sql, binder, row -> Boolean.TRUE).isEmpty();
+    }
+
+    int update(String sql, Sql.Binder binder) {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            binder.bind(statement);
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new StoreException("update failed: " + summarise(sql), e);
+        }
+    }
+
+    private static String summarise(String sql) {
+        return sql.strip().lines().findFirst().orElse(sql);
+    }
+
     void commit() {
         try {
             connection.commit();
@@ -208,17 +204,9 @@ public final class Database implements AutoCloseable {
         try {
             connection.rollback();
         } catch (SQLException e) {
-            // The caller is already unwinding a failure; nothing useful to do here.
         }
     }
 
-    /**
-     * The tables {@link #count(Table)} may read.
-     *
-     * <p>An enum rather than a string because a table name cannot be bound as a
-     * parameter and so has to be interpolated. Restricting the input to a closed
-     * set keeps that safe by construction rather than by convention.
-     */
     public enum Table {
         FILING("filing"), BLOCK("block"), SENTENCE("sentence"), TERM("term"),
         OCCURRENCE("occurrence"), CANDIDATE("candidate"), KNOWN_LEMMA("known_lemma");
@@ -231,13 +219,8 @@ public final class Database implements AutoCloseable {
     }
 
     long count(Table table) {
-        try (Statement statement = connection.createStatement();
-             var rs = statement.executeQuery("SELECT COUNT(*) FROM " + table.name)) {
-            rs.next();
-            return rs.getLong(1);
-        } catch (SQLException e) {
-            throw new StoreException("cannot count " + table.name, e);
-        }
+        return queryOne("SELECT COUNT(*) FROM " + table.name, Sql.Binder.NONE,
+                row -> row.getLong(1)).orElse(0L);
     }
 
     @Override
