@@ -1,14 +1,14 @@
 # Ikeda — Technical Design Document
 
-**Status:** Draft · **Last updated:** 2026-08-02
+**Status:** Living document · **Last updated:** 2026-08-08
 
 ---
 
 ## 1. Problem
 
-Advanced learners of Japanese working in finance have no tool that answers the question that actually matters: *given everything I already know, which words would most improve my comprehension of the documents I read at work?*
+An advanced learner of Japanese working in finance has no tool that answers the question that matters: *given everything I already know, which words would most improve my comprehension of the documents I read at work?*
 
-The existing ecosystem solves adjacent problems. Yomitan and Jiten serve reactive lookup. jpdb ranks vocabulary by frequency in entertainment media. asbplayer and mokuro mine subtitles and manga. None of them operate over Japanese financial disclosure, and none of them prioritise against a learner's existing collection.
+The existing ecosystem solves adjacent problems. Popup dictionaries serve reactive lookup. Media-mining tools rank vocabulary by frequency in entertainment. None operate over Japanese financial disclosure, and none prioritise against a particular learner's existing collection.
 
 The gap is **prioritisation**, not lookup. A single 有価証券報告書 contains a few thousand lemmas a fluent non-native reader does not fully own. Which two hundred are worth the effort?
 
@@ -23,16 +23,16 @@ Ikeda mines Japanese regulatory filings and produces a ranked, deduplicated, con
 | ID | Goal |
 |----|------|
 | G1 | Rank domain vocabulary by acquisition yield, not raw frequency |
-| G2 | Never propose a term already present in the user's Anki collection |
+| G2 | Never propose a term the learner has already confirmed as known |
 | G3 | Every generated card carries an authentic example sentence and a traceable source |
 | G4 | Report comprehension coverage over the corpus, and its change over time |
-| G5 | Phase 1 runs as a single local process with no server dependencies |
+| G5 | Run as a single local process with no server dependencies |
 
 ### Non-goals
 
-- A popup dictionary — Yomitan does this well
+- A popup dictionary — that problem is well served elsewhere
 - A spaced-repetition scheduler — Anki with FSRS does this well
-- Translation, summarisation, or document QA — that is FinDocDRAG's problem, not this one
+- Translation, summarisation, or document question-answering
 - General-purpose Japanese learning — this targets one register deliberately
 - Multi-user or hosted operation — single-user, local-first
 
@@ -40,206 +40,191 @@ Ikeda mines Japanese regulatory filings and produces a ranked, deduplicated, con
 
 ## 3. Success criteria
 
-The project is working if, and only if:
+The original criterion was *≥70% of the top 50 candidates judged worth learning*. It was written before any data existed and has been **revised**, because measurement showed it asks the tool to do something structurally impossible: predict one person's vocabulary from population statistics. The residual information exists only in the learner's head, and the review loop is the mechanism for extracting it.
 
-| Metric | Target | How measured |
-|--------|--------|--------------|
-| Candidate precision | ≥ 70% of the top 50 candidates judged worth learning | Manual review, recorded verdicts |
-| Card quality | < 20% of generated cards need manual edit before study | Edit count during first review pass |
-| Duplicate rate | 0 candidates already in the collection | Assertion against known-set |
-| Coverage lift | Measurable rise in known-token ratio on held-out filings | Coverage metric, before/after |
+The criteria are now:
 
-Candidate precision is the primary metric. If the top 50 is mostly noise, no amount of downstream engineering rescues the project — the ranking is the product.
+| Metric | Target | Measured |
+|--------|--------|----------|
+| Ranking lift over unranked baseline | ≥ 1.5× | **2.3×** (22% → 60% at top 30) |
+| Reviews per accepted card | < 3 | **1.7** at top 30 |
+| Duplicate rate | 0 candidates already confirmed known | 0 |
+| Coverage lift | Rising known-token ratio on held-out filings | not yet measured |
+
+Lift is the primary metric. If the ranked list is no better than random, no amount of downstream engineering rescues the project.
 
 ---
 
 ## 4. Architecture
 
-Phase 1 is a single Java process writing to an embedded database. There is no Kafka, no service split, and no vector store until the ranking is demonstrably good.
+A single Java process writing to an embedded database. No message broker, no service split, no vector store.
 
 ```
 EDINET API v2
       │
       ▼
  ┌─────────────┐   ┌──────────────┐   ┌─────────────┐   ┌──────────────┐
- │   Ingest    │──▶│   Analyse    │──▶│    Rank     │──▶│   Generate   │
- │  fetch,     │   │  segment,    │   │  keyness,   │   │  sentence,   │
- │  extract    │   │  tokenise,   │   │  known-set, │   │  gloss,      │
- │  narrative  │   │  compounds   │   │  scoring    │   │  push        │
+ │   Ingest    │──▶│   Analyse    │──▶│    Rank     │──▶│    Review    │
+ │  fetch,     │   │  segment,    │   │  baseline   │   │  batch out,  │
+ │  extract    │   │  tokenise    │   │  rarity,    │   │  verdicts    │
+ │  narrative  │   │  dedupe      │   │  known-set  │   │  back in     │
  └─────────────┘   └──────────────┘   └─────────────┘   └──────────────┘
         │                 │                  │                  │
         └─────────────────┴──────────────────┴──────────────────┘
                                  │
-                          SQLite (local store)
+                          SQLite (local file)
                                  │
                     ┌────────────┴────────────┐
                     ▼                         ▼
-              BCCWJ baseline          Anki (AnkiConnect)
-                                      known-set in, cards out
+             BCCWJ baseline            Anki (AnkiConnect)
+                                       known-set in, cards out
 ```
 
-**Why SQLite in phase 1.** The workload is a few hundred filings and low-millions of token occurrences. That is comfortably within SQLite's range, costs zero operational effort, and keeps the feedback loop fast. The migration trigger to PostgreSQL is explicit: **when embeddings enter the pipeline** (phase 4, semantic deduplication), because that needs pgvector.
+**Why SQLite.** The workload is a few hundred filings and low-millions of token occurrences — comfortably within range, zero operational effort, and a fast feedback loop. Anki's own collection is a SQLite file, so both sides of the project use one driver. A server database becomes the right answer only if more than one process needs concurrent access.
 
-**Module layout.** Single Gradle module, packages by pipeline stage: `com.ikeda.ingest`, `com.ikeda.analyse`, `com.ikeda.rank`, `com.ikeda.generate`, `com.ikeda.store`. Split into modules only if and when services split.
+**Package layout.** `com.ikeda.ingest` fetches and extracts, `analyse` segments and tokenises, `rank` holds the baseline, `anki` reads the collection, `review` is the sheet format, `store` is persistence, `support` is shared text utilities.
+
+**Commands.** `ingest`, `anki`, `sample`, `export`, `verdicts`, `status`.
 
 ---
 
-## 5. Pipeline stages
+## 5. Pipeline
 
 | Stage | Input | Output | Notes |
 |-------|-------|--------|-------|
-| 1. List | date | docIDs | `docTypeCode=120`, `csvFlag=1` |
-| 2. Fetch | docID | CSV bundle | `type=5`, rate-limited |
-| 3. Extract | CSV bundle | narrative blocks | `要素ID` containing `TextBlock`; no genre filtering — see §5.0 |
-| 4. Segment | block | sentences | `Tokenizer.tokenizeSentences`, then the §5.0 sentence filter |
-| 5. Tokenise | sentence | morphemes | Sudachi mode C, mode A for parts |
-| 6. Compound | morpheme run | compound terms | noun-run detection + association scoring |
-| 7. Baseline | term | keyness | log-likelihood vs BCCWJ |
-| 8. Known-set | Anki | known lemmas | AnkiConnect, normalised |
-| 9. Rank | terms | candidates | filters + score |
-| 10. Select | candidate | example sentence | i+1 constraint |
-| 11. Gloss | candidate | meaning | JMdict, LLM fallback |
-| 12. Push | card | Anki note | AnkiConnect |
+| 1. List | date | docIDs | `docTypeCode=120`, `ordinanceCode=010`, `formCode=030000` |
+| 2. Fetch | docID | CSV bundle | `type=5`, one request every four seconds |
+| 3. Extract | CSV bundle | narrative blocks | `要素ID` containing `TextBlock`, `jpcrp` files only |
+| 4. Segment | block | sentences | Sudachi, then the §5.1 prose filter, then dedupe |
+| 5. Tokenise | sentence | terms | Sudachi mode C; readings resolved per §5.2 |
+| 6. Promote | terms | candidates | filters in §5.3 |
+| 7. Rank | candidates | ordered batch | baseline rarity, §5.4 |
+| 8. Review | batch | verdicts | tab-separated round trip |
 
-The non-obvious stages are specified below.
+### 5.1 Prose selection
 
-### 5.0 Prose selection (stages 3–4)
-
-A filing is roughly one quarter financial tables. EDINET's XBRL-to-CSV conversion flattens them into the same `TextBlock` values as narrative prose, with **all markup and cell boundaries already removed** — the tags are gone before the data reaches us, so structure cannot be recovered:
+A filing is roughly one quarter financial tables. EDINET's conversion flattens them into the same `TextBlock` values as narrative, with **all markup and cell boundaries already removed**, so structure cannot be recovered:
 
 ```
 売上高（千円）3,054,7143,364,9353,293,3673,797,3743,571,516経常損失（△）（千円）△936,011…
 ```
 
-Detection and discard is therefore the only option. The rule is:
+Detection and discard is therefore the only option. The rule:
 
 ```
 keep a sentence iff  text ends with 。  and  15 ≤ length ≤ 200
 ```
 
-Tables have no sentence terminators because they are not sentences. This is a structural property of the data rather than a tuned heuristic, and it is a rule stage 10 already requires for card examples — applied one stage earlier, it costs nothing new.
+Tables have no sentence terminators because they are not sentences. This is a structural property of the data rather than a tuned heuristic, and it is a rule card generation needs anyway. Prose retention is stable at 65–69% of characters across filings; the remainder is headings, fragments and table residue.
 
-Measured over three filings, prose retention is stable at 65–69% of characters; the discarded remainder is headings, fragments and table residue. Roughly 1–2 sentences in 100 survive imperfectly, split inside a parenthetical `「…という。」` or carrying a table fragment. Excluding sentences containing `【` (structural markup that never occurs in running prose) would remove most of the remainder; it is deliberately **not** applied until the phase 2 candidate list shows whether it matters.
+**Block-level genre filtering was evaluated and rejected.** Element IDs describe where content lives, not what it is: `IssuedSharesTotalNumberOfSharesEtcTextBlock` reads like a share table, and in a company with preferred shares it holds pages of legal prose — 優先配当金, 償還請求日, 転換価額, 比例按分. A hiragana-ratio threshold separated cleanly at block level but not at sentence level, where legitimate prose runs as low as 6% hiragana.
 
-**Block-level genre filtering is explicitly rejected.** An element-ID allowlist or denylist, and a hiragana-ratio threshold, were both evaluated and discarded:
+**Deduplication is required.** Between 15% and 23% of the sentences in a single filing are exact duplicates, because consolidated (連結) and non-consolidated (個別) contexts repeat the same text. Removed in-process, with `UNIQUE(doc_id, text)` as a backstop. Identical sentences in *different* filings are kept deliberately: document frequency must count each filing.
 
-- **Element IDs describe where content lives, not what it is.** `IssuedSharesTotalNumberOfSharesEtcTextBlock` reads like a share table, and in a company with preferred shares it holds several pages of legal prose — 優先配当金, 償還請求日, 転換価額, 比例按分. `AnnexedDetailedScheduleOfPropertyPlantAndEquipment` carries footnotes containing 減損損失累計額. Denylisting either would discard some of the highest-value vocabulary in the corpus.
-- **Hiragana ratio separates cleanly at block level but not at sentence level.** Legitimate prose sentences run as low as 6% hiragana, so any threshold that removes tables also removes real content. It was the right measurement at the wrong granularity, and the terminator rule makes it redundant.
+### 5.2 Readings
 
-**Deduplication is required, not optional.** Between 15% and 23% of the sentences in a single filing are exact duplicates, because consolidated (連結) and non-consolidated (個別) contexts repeat the same text. Enforced by `UNIQUE(doc_id, text_hash)`. Left unhandled, corpus frequency is inflated by roughly a fifth while document frequency is unaffected — which would silently distort keyness.
+`Morpheme.readingForm()` returns the reading of the **surface**, so an inflected word yields a reading that does not belong to the form stored as the term key: 晒される is keyed 晒す but reads サラサ. `ReadingResolver` re-tokenises the dictionary form and caches the result, because a few thousand lemmas repeat across 115,000 sentences.
 
-### 5.1 Compound reconstruction (stage 6)
+### 5.3 Candidate filters
 
-**Why this exists.** Sudachi mode C merges only compounds attested in SudachiDict. Empirically, `課税所得`, `蓋然性` and `可能性` merge; `繰延税金資産` does not — it fragments into `繰延 / 税金 / 資産`. Financial Japanese is dense with long compounds absent from a general dictionary, so reconstruction is a required stage, not an optimisation.
+A term is promoted to candidate only if all hold:
 
-**Algorithm.**
+| Filter | Rationale |
+|---|---|
+| Content part of speech | 名詞, 動詞, 形容詞, 副詞 |
+| Length ≥ 2 characters | Single characters are fragments |
+| **Contains at least one kanji** | See below |
+| Document frequency ≥ 9 (5% of corpus) | Below this a term is one company's jargon — removes ~76% of vocabulary |
+| Not in `known_lemma` | Never propose a confirmed known word |
 
-1. Over the mode-C token stream, take maximal runs of ≥2 consecutive tokens where `partOfSpeech()[0] == 名詞`, excluding 数詞, 代名詞 and 固有名詞. Proper nouns are excluded because they are company and product names, not vocabulary.
-2. Candidate compound = concatenation of **`surface()`**, never `normalizedForm()`. Normalisation rewrites `繰延 → 繰り延べ`, which would produce the non-word `繰り延べ税金資産`. Normalised forms remain the lookup key for single tokens only.
-3. Score association across the run. Accept if document frequency ≥ threshold and the minimum adjacent-pair PMI exceeds a floor. This separates real terms (`繰延税金資産`, recurring across thousands of filings) from incidental adjacency (`当社 事業 拡大`).
-4. Emit accepted compounds as terms; also retain their parts as terms in their own right.
-5. Feed accepted compounds into a **Sudachi user dictionary** (`Config.addUserDictionary`) so subsequent passes tokenise them atomically.
+**The kanji requirement** covers two separately measured problems:
 
-Thresholds are corpus-dependent and will be tuned empirically in phase 2. They cannot be set from a single document.
+- **Katakana** is overwhelmingly English loanwords — ロボティクス, エンゲージメント, パンデミック. All eleven that reached review were already known, because an English speaker reads them for free. They are 13% of the pool, and being recent borrowings they rank as very rare in a 2015 baseline, so they otherwise dominate the top of the ranking.
+- **Kana-only content words** are grammatical scaffolding the tokeniser labels as nouns or verbs — こと, よる, つく, うち. Only twelve exist in the pool, and their baseline ranks are wildly wrong because the reference corpus canonicalises them to kanji (こと to 事), making them look among the rarest words in Japanese.
 
-### 5.2 Keyness (stage 7)
+Stored as `term.has_kanji` at ingestion rather than tested at query time, because SQLite has no character-class matching for CJK.
 
-Raw frequency surfaces 会社, 当社, 事業 — true and useless. Ikeda ranks by over-representation relative to general Japanese.
+### 5.4 Ranking
 
-Dunning log-likelihood, for term with frequency `a` in the EDINET corpus (size `N₁`) and `b` in the baseline (size `N₂`):
+**Candidates are ordered by rarity in general written Japanese**, rarest first, using the BCCWJ short-unit frequency list. Ties break on corpus frequency.
 
-```
-E₁ = N₁(a+b)/(N₁+N₂)
-E₂ = N₂(a+b)/(N₁+N₂)
-G² = 2(a·ln(a/E₁) + b·ln(b/E₂))          signed by whether a/N₁ > b/N₂
-```
+This is the only feature that survived testing. Measured against 150 manually judged words:
 
-**Baseline:** NINJAL's BCCWJ frequency lists. Use the **long-unit (LUW)** list against mode C and the short-unit (SUW) list against mode A — the unit definitions align, which avoids systematic mismatch.
+| Feature | AUC | Outcome |
+|---|---|---|
+| **Baseline rarity** | **0.730** | **Adopted** |
+| Corpus frequency | 0.615 | Too weak |
+| Document frequency | 0.599 | Too weak |
+| Formal/casual register ratio | 0.555 | Noise |
+| Word length | 0.414 | Weak, and *inverted* |
+| Anki membership | — | Not usable alone; see §7 |
 
-**Dispersion** is applied as a filter, not a weight: require document frequency ratio ≥ 0.05. A term appearing 400 times in one filing is that company's jargon, not financial Japanese.
+The interpretation is that a learner who acquired Japanese by living in it has gaps precisely where a word rarely appears outside professional writing. Word length running backwards is the same effect: long compounds like 非正規雇用労働者 are transparent from their parts, while opaque two-character compounds like 改廃 and 業態 are not.
 
-### 5.3 Compositionality (stage 9)
+**Terms absent from the baseline are ranked last, not first.** 23% of candidates cannot be looked up, because they are compounds the baseline tokenises into shorter units — 公認会計士, 経常利益, 連結損益計算書. Those absent words proved **74% already known**, so treating absence as maximal rarity would put the worst candidates at the top.
 
-A compound whose meaning is predictable from parts the learner already knows is cheap. One that is opaque is expensive and deserves a card.
+**Matching on reading as well as written form was tested and rejected.** It fixes the orthographic-variant cases (こと from rank 131,323 to 20) but collapses homophones, falsely demoting genuinely rare words. AUC fell from 0.759 to 0.717.
 
-```
-comp(t) = |{parts of t that are in the known set}| / |parts of t|
-comp(t) = 0 for atomic terms
-```
+### 5.5 Example sentences
 
-Parts come from `Morpheme.split(SplitMode.A)` for dictionary-attested compounds, and by construction for reconstructed compounds.
-
-`有利子負債` scores 1.0 when 利子 and 負債 are known — transparent, deprioritised despite high keyness. `蓋然性` scores 0.0 because 蓋然 is not independently known — opaque, prioritised.
-
-### 5.4 Candidate ranking (stage 9)
-
-**Hard filters:** `G² ≥ 15.13` (p < 0.0001), document frequency ratio ≥ 0.05, not in known set, content POS only.
-
-**Rank by:** `G²(t) × (1 − λ·comp(t))`, with `λ = 0.7`.
-
-Dispersion deliberately stays a filter rather than entering the score — one tunable knob is easier to reason about than three.
-
-### 5.5 Known-set extraction (stage 8)
-
-Query AnkiConnect `findNotes` with `deck:*`, then `notesInfo`. Take Expression fields, **split on `,` and `、`** (existing notes contain comma-separated variants such as `妬む, 嫉む`), and normalise each through the same Sudachi pipeline that produced the candidates. Symmetry matters — a mismatch in normalisation silently reintroduces duplicates.
-
-Seed the set with sub-N2 vocabulary so common words are never proposed.
-
-### 5.6 Example sentence selection (stage 10)
-
-**Hard filters:** 15 ≤ length ≤ 80 characters; at most one *other* unknown term; terminates in `。`; no leading anaphora (`当該`, `上記`, `同`, `なお`) that references outside the sentence.
-
-**Sequencing.** When the only good sentence for term X also contains unknown term Y, Y is scheduled first and the sentence becomes valid for X one card later. The selector is a scheduler, not a filter.
+Each candidate carries the shortest sentence between 20 and 80 characters containing it — short enough to read at a glance, long enough for context, and most likely to stand alone. This is a placeholder for proper i+1 selection, which should additionally require at most one *other* unknown term and reject sentences opening with anaphora (当該, 上記, 同).
 
 ---
 
 ## 6. Data model
 
 ```
-filing(doc_id PK, edinet_code, filer_name, doc_type_code, submit_date, fetched_at)
-block(id PK, doc_id FK, element_id, seq, text)
-sentence(id PK, block_id FK, seq, text, char_len, token_count)
-term(id PK, key UNIQUE, surface, reading, pos, is_compound, part_keys)
-occurrence(term_id FK, sentence_id FK, position)
-term_stat(term_id PK, corpus_freq, doc_freq, keyness, compositionality)
-known_lemma(key PK, source, first_seen)
-candidate(term_id PK, score, best_sentence_id, status, decided_at)
+filing(doc_id PK, edinet_code, filer_name, doc_type_code,
+       ordinance_code, form_code, submit_date_time, ingested_at)
+
+block(id PK, doc_id FK, seq, element_id, text)
+      -- raw narrative retained so segmentation rules can change and be
+      -- replayed without re-fetching at four seconds per filing
+
+sentence(id PK, doc_id FK, block_id FK, seq, text, char_len, token_count,
+         UNIQUE(doc_id, text))
+
+term(id PK, key UNIQUE, surface, reading, pos, has_kanji)
+
+occurrence(id PK, term_id FK, sentence_id FK, doc_id, position)
+      -- doc_id denormalised: document frequency is COUNT(DISTINCT doc_id)
+      -- grouped by term, and that runs on every ranking pass
+
+known_lemma(lemma PK, source, first_seen)
+
+candidate(term_id PK, corpus_frequency, document_frequency, bccwj_rank,
+          example_sentence_id, status, decided_at)
 ```
 
-`candidate.status` records the manual verdict (`accepted` / `rejected` / `pending`). Those verdicts are the measurement for the candidate-precision metric and must not be discarded.
+`candidate.status` records the manual verdict — `PENDING`, `KNOWN`, `WORTH_LEARNING`, `NOT_WORTH_LEARNING`. Three outcomes rather than two because "I already know it" and "not worth a card" mean different things: the first says the known-set model is wrong, the second says the ranking is. Re-populating candidates deliberately leaves verdicts untouched.
+
+**Schema changes** are handled by adding columns in place at startup. Anything more involved should be a delete-and-re-ingest, since the corpus is always rebuildable.
 
 ---
 
 ## 7. Anki integration
 
-**Deck:** new tree, isolated from existing collections.
+### Reading the known set
 
-```
-金融
-├── 金融::有報
-├── 金融::適時開示
-└── 金融::prep::*      (throwaway filtered decks for document pre-reads)
-```
+The whole collection is treated as known, on the owner's instruction: the review metadata spans several backups and accounts over years, so card maturity says nothing reliable about whether a word was learned.
 
-**Rationale for isolation.** FSRS optimises parameters per preset. Opaque financial compounds have a different difficulty and stability profile from N1 exam vocabulary; mixing them produces parameters fitted to neither, and injecting hundreds of new cards perturbs an optimiser currently well-tuned on years of history. Isolation also allows the whole experiment to be suspended or deleted without touching existing decks.
+Headwords come from `TargetKanji` where present, otherwise `Expression` — order matters, because some note types keep the headword in `TargetKanji` and a full example sentence in `Expression`. Comma-separated variants are split; anything containing spaces or longer than 12 characters is a sentence or a grammar pattern, not a word.
 
-**Note type:** dedicated, not `Basic`.
+This yields ~5,700 lemmas and removes 16% of the candidate pool. **It is a reliable but narrow filter**: most of what an advanced learner knows was never carded, because it was too basic to need a card. Before the owner clarified that everything carded is known, the measurement suggested Anki membership was an *anti*-signal — words in the collection were more likely to be judged worth learning, since they were carded precisely because they were hard.
 
-| Field | Purpose |
-|-------|---------|
-| Expression, Reading, Meaning | core |
-| Example, ExampleSource | filing sentence and citation |
-| DocID | traceability back to EDINET |
-| Keyness, Compositionality | correlate ranking features against future retention |
-| MinedAt | cohort analysis |
+Verdicts of `KNOWN` are promoted into `known_lemma` with `source='review'`. This is what closes the gap no ranking can close: the known set grows every session and words never resurface.
 
-The metadata fields cost nothing now and cannot be backfilled later. They are what will eventually allow the question *does keyness predict retention?* to be answered against the revlog.
+### Writing cards
 
-**Card templates:** recognition (JP→EN) primary; a reading-only template is planned, targeting terms understood conceptually in English but unreadable aloud — a specific failure mode at this level.
+Not yet built. When it is:
 
-**Duplicate handling.** Deduplication happens upstream via the known-set; Anki's check is a backstop only. Configure `duplicateScopeOptions.checkAllModels: true` — the default checks only notes of the same note type, so a new note type would not detect a word already present as a `Basic` note.
+**Deck:** a new tree, isolated from existing collections — `金融`, `金融::有報`, `金融::適時開示`. FSRS optimises parameters per preset, and opaque financial compounds have a different difficulty profile from exam vocabulary; mixing them fits neither. Isolation also allows the whole experiment to be deleted without touching years of history.
 
-**JSON construction.** Note payloads must be built with Jackson, never `String.format` into a JSON template. Filing prose contains `「」`, `"` and backslashes that break naive interpolation.
+**Note type:** dedicated, not `Basic`. Fields: Expression, Reading, Meaning, Example, ExampleSource, DocID, plus BaselineRank and MinedAt. The metadata cost nothing to store and cannot be backfilled; they are what will eventually allow *does baseline rarity predict retention?* to be answered against the review log.
+
+**Duplicate handling:** deduplication happens upstream via `known_lemma`; Anki's own check is a backstop. Configure `duplicateScopeOptions.checkAllModels` — the default checks only notes of the same type, so a new note type would not detect a word already present as `Basic`.
+
+**JSON construction** must use a real serialiser. Filing prose contains 「」, quotes and backslashes that break string interpolation.
 
 ---
 
@@ -247,78 +232,90 @@ The metadata fields cost nothing now and cannot be backfilled later. They are wh
 
 | Dependency | Version | Licence / constraint |
 |------------|---------|---------------------|
-| Java | 25 LTS (Temurin) | — |
-| Gradle | 9.6 | 9.1+ required for JDK 25 daemon |
+| Java | 25 LTS | — |
+| Gradle | 9.6 | 9.1+ required for JDK 25 |
 | Sudachi | 0.7.5 | Apache 2.0 |
 | SudachiDict | core | Apache 2.0; ~70MB, gitignored |
 | Jackson | 2.19.0 | Apache 2.0 |
 | Commons CSV | 1.14.1 | Apache 2.0 |
+| SQLite JDBC | 3.49.1.0 | Apache 2.0 |
 | EDINET API | v2 | Free key; **3–5s between requests** |
-| BCCWJ frequency lists | v1.1 | NINJAL, free for research/education — **must not be vendored**; fetch at setup, gitignore |
-| JMdict | current | EDRDG, CC BY-SA — attribution required; do not redistribute derived dictionaries |
+| BCCWJ frequency list | SUW v1.0 | NINJAL, free for research and education — **not redistributable**; fetched separately, gitignored |
+| AnkiConnect | v6 | Local add-on, read-only usage |
 
-Corpus data is never committed. Test fixtures may contain small excerpts of EDINET filings, which are public disclosure.
+Corpus data, the dictionary and the baseline are never committed. Test fixtures may contain small excerpts of EDINET filings, which are public disclosure.
 
 ---
 
-## 9. Delivery phases
+## 9. Status
 
-Each phase has an explicit exit criterion. A phase that fails its criterion is a signal to stop or rethink, not to proceed.
+### Built
 
-| Phase | Scope | Exit criterion |
-|-------|-------|----------------|
-| **0** ✅ | Toolchain, Sudachi, EDINET listing | 205 filings listed; mode C tokenising correctly |
-| **1** | Corpus: fetch, extract, segment, tokenise, persist | ≥180 filings in local store; top terms by document frequency are unremarkable |
-| **2** | Ranking: compounds, keyness, known-set, scoring | **≥70% of top 50 judged worth learning** |
-| **3** | Cards: sentence selection, glosses, AnkiConnect push | 40 cards in 金融::有報 studied without edits |
-| **4** | Productionise: daily ingestion, Postgres, embeddings, coverage dashboard | Only if 1–3 pass |
+- EDINET ingestion, genre-filtered, resumable, rate-limited
+- Narrative extraction and prose selection
+- Sentence segmentation, tokenisation, per-filing deduplication, reading resolution
+- Corpus persistence — 181 filings, 115,479 sentences, 20,769 terms, 2,468,430 occurrences
+- Known set from Anki — ~5,700 lemmas
+- Baseline ranking — 3,382 candidates, 2,158 scored
+- Review round trip with persisted verdicts
 
-Phase 4 is where the FinDocDRAG architecture — Kafka, pgvector, Helm, Grafana — becomes justified. EDINET publishes daily and 適時開示 is a genuine continuous stream, so the streaming design is not decoration. But it earns its place at ten thousand documents, not fifty. **Every algorithmic decision that determines whether this project is useful lives in phases 2 and 3, and all of it runs in a single process.**
+### Not built
+
+**Compound reconstruction.** Sudachi mode C merges only compounds attested in its dictionary: 課税所得 and 蓋然性 merge, 繰延税金資産 fragments into 繰延 / 税金 / 資産. The fragments are visible in the candidate pool — 貸し倒れ and 繰り延べ both appear as standalone terms.
+
+The approach: take maximal runs of consecutive 名詞 tokens excluding 数詞, 代名詞 and 固有名詞; build the candidate from `surface()`, never `normalizedForm()`, because normalisation rewrites 繰延 to 繰り延べ and would produce the non-word 繰り延べ税金資産; accept a run when document frequency and adjacent-pair association both clear a floor; feed accepted compounds into a Sudachi user dictionary so later passes tokenise them atomically. Thresholds are corpus-dependent and cannot be set from a single document.
+
+This should also improve ranking coverage, since many of the 23% of candidates absent from the baseline are exactly these compounds.
+
+**Card generation.** i+1 example selection, glosses, and the AnkiConnect write path described in §7.
+
+**Coverage measurement.** G4 is unimplemented: what fraction of tokens in a held-out filing does the learner know, and how does it move.
 
 ---
 
 ## 10. Observability and testing
 
-**Stage counters are mandatory from phase 1.** Every stage logs documents in/out, blocks in/out, sentences, tokens, and terms. This is not future-proofing: the first real integration attempt returned zero narrative blocks with no indication of which assumption had failed, which cost a debugging cycle that a single count would have made obvious.
-
-Every stage must be able to answer *how many items entered, how many left, and why the difference*.
+**Stage counters are mandatory.** Every stage logs items in, items out, and the reason for the difference. This is not future-proofing: the first integration attempt returned zero narrative blocks with no indication of which assumption had failed, and the counters diagnosed it in a single run — after three plausible hypotheses had all proved wrong.
 
 **Testing:**
 
-- Golden-file tests on a vendored sample EDINET CSV — covers UTF-16 decoding, quoting, and embedded newlines without network access
-- Unit tests on keyness arithmetic against hand-computed values
-- Unit tests on compound detection with fixed token sequences
-- Property test: known-set extraction is idempotent and normalisation-symmetric with candidate generation
+- Parsing is exercised against zip bundles built in-test — UTF-16, quoted fields with embedded newlines, audit reports to exclude
+- The prose filter is tested on real sentences and real flattened tables taken from filings
+- Segmentation and reading resolution run against the real Sudachi tokeniser, skipping cleanly when the dictionary is absent
+- Persistence runs against an in-memory database: atomicity, resumability, known-set exclusion, verdict preservation
+- The Anki transport is tested against a real in-process HTTP server, not a mocked client
+- Schema migration is tested by opening databases built to older shapes
 
 ---
 
-## 11. Open questions and risks
-
-| # | Item | Impact | Status |
-|---|------|--------|--------|
-| 1 | Narrative extraction returns 0 blocks | ~~Blocker~~ | **Resolved 2026-08-02.** Cause was genre, not parsing — see finding 6. Encoding and header names were never wrong |
-| 1b | Financial tables contaminate the corpus | ~~Medium~~ | **Resolved 2026-08-02.** Solved by the §5.0 sentence-terminator rule. An allowlist was evaluated and rejected as actively harmful — see findings 9–11 |
-| 2 | JMdict coverage of financial compounds expected to be poor | Medium | Mitigation: LLM gloss grounded in the actual filing sentence, not a generic definition |
-| 3 | Compound readings may be wrong (rendaku, irregular readings) | Medium | `readingForm()` concatenation is unreliable for reconstructed compounds; needs validation |
-| 4 | Association thresholds unknown | Medium | Tunable only against a real corpus; deferred to phase 2 |
-| 5 | Single-user data may be thin for coverage statistics | Low | Descriptive metrics only; no causal claims |
-| 6 | Anki Expression fields are inconsistently formatted | Low | Known from existing collection; parser must handle comma variants and full-width punctuation |
-
----
-
-## 12. Empirical findings to date
+## 11. Empirical findings
 
 Recorded because they are design inputs, not incidental observations.
 
-1. **2026-06-26 yields 205 有価証券報告書 with CSV available.** Peak filing season for March year-end companies is late June; most other dates return few or none.
-2. **Sudachi mode C merges only dictionary-attested compounds.** `課税所得`, `蓋然性`, `可能性` merge. `繰延税金資産` does not. This is correct behaviour and is the direct justification for stage 6.
-3. **`normalizedForm()` is unsafe for compound reconstruction.** `繰延 → 繰り延べ`. Reconstruct from `surface()`.
-4. **`Tokenizer.lazyTokenizeSentences`** provides sentence segmentation and bounded-memory streaming over large documents, removing the need for regex sentence splitting.
-5. **EDINET CSVs are UTF-16, tab-separated, quoted, with newlines inside quoted fields.** A proper CSV parser is mandatory; line-splitting silently shreds every narrative section.
-6. **`docTypeCode=120` is too coarse — it mixes three document genres.** The XBRL taxonomy prefix identifies the genre: `jpcrp030000` is ordinary corporate 有価証券報告書 (wanted), `jpsps070000` is 特定有価証券報告書 for investment trusts and SPCs (different structure), `jpaud` is the 監査報告書 attached to every filing. Audit reports are near-identical boilerplate; ingesting them would give a corpus where the same 監査意見 legalese repeats once per filing and dominates document frequency.
-7. **Genre is filterable before download.** `ordinanceCode=010` + `formCode=030000` in `documents.json` selects jpcrp corporate filings, avoiding a wasted 4-second fetch per unwanted document. A zip-entry filter on `/jpcrp` is still required, because audit reports are bundled inside corporate filings too.
-8. **Observability paid for itself immediately.** The zero-block failure was diagnosed in a single run from the entry-name dump. The three hypotheses under investigation before instrumentation (encoding, BOM, header names) were all wrong.
-9. **TextBlock values contain no markup.** EDINET's CSV conversion strips HTML and flattens tables before delivery — no `<td>`, no `&lt;td&gt;`, no tags of any kind. Table structure cannot be recovered, only detected and discarded.
-10. **Sentence terminators separate prose from tables almost perfectly.** Requiring `。` plus a length bound retains 65–69% of prose characters and discards 89–97% of table characters, consistently across filings. No tuned constant is involved.
-11. **Element IDs are not a reliable genre signal.** `IssuedSharesTotalNumberOfSharesEtcTextBlock` contains preferred-share terms and conditions — dense financial legal prose — in companies that issue them, while reading like a pure table in companies that do not. The same block varies in genre by filer. This is why §5.0 filters content rather than containers.
-12. **Sentences repeat within a filing.** 15–23% of extracted sentences are exact duplicates arising from 連結/個別 context pairs on the same element.
+1. **`docTypeCode=120` mixes three document genres.** `jpcrp030000` is ordinary corporate 有価証券報告書; `jpsps070000` is 特定有価証券報告書 for investment trusts, structured differently; `jpaud` is the audit report bundled with every filing and near-identical across companies. Genre is filterable before download via `ordinanceCode` and `formCode`, saving a four-second fetch per unwanted document.
+2. **TextBlock values contain no markup.** Tables arrive already flattened; structure cannot be recovered, only detected.
+3. **Sentence terminators separate prose from tables almost perfectly** — 65–69% of prose characters retained, 89–97% of table characters discarded, with no tuned constant.
+4. **Element IDs are not a reliable genre signal.** The same element holds a table in one filer and legal prose in another.
+5. **Sudachi mode C merges only dictionary-attested compounds**, and `normalizedForm()` is unsafe for reconstructing them.
+6. **Sentences repeat within a filing**, 15–23% of them, from 連結/個別 context pairs.
+7. **Document frequency does not predict what the learner does not know.** Judged across five frequency bands, the worth-learning rate was 17%, 37%, 13%, 43%, 33% — flat within sampling noise. Unknown words are scattered evenly across the frequency range, including words appearing in 170+ of 181 filings.
+8. **Nothing in the dispersion-filtered pool was junk.** Of 150 reviewed words, zero were judged "unknown but not worth learning". The `df ≥ 9` floor is doing its job, arguably conservatively.
+9. **Baseline rarity is the only working predictor**, AUC 0.730. Register, length, corpus frequency and document frequency all failed.
+10. **Absence from the baseline is a tokenisation artifact, not rarity** — those words are 74% already known.
+11. **Katakana loanwords are free for an English speaker** — 11 of 11 already known.
+12. **The learner's Anki collection is a narrow known-set**, covering 16% of the pool, because most of what they know was never carded.
+13. **Observability paid for itself immediately** — see §10.
+
+---
+
+## 12. Open questions
+
+| # | Item | Impact | Status |
+|---|------|--------|--------|
+| 1 | Compound reconstruction unimplemented | High | Open — the largest remaining lever on both ranking coverage and card quality |
+| 2 | Some sentences carry a section heading welded to the front (`３【事業の内容】　当社の…`) | Medium | Open. The sentence is valuable; the fix is to strip the `【…】` prefix, not discard the row |
+| 3 | A small number of candidates have no example sentence in the 20–80 character window | Low | Open |
+| 4 | Coverage metric (G4) unimplemented | Medium | Open |
+| 5 | Table-header fragments still reach the ranked list — 役分, 外数, 既発 | Low | Open; compound reconstruction may absorb some |
+| 6 | A term key can occur with several readings; one is stored as representative | Medium | Must be resolved before readings reach cards |
+| 7 | No continuous integration | Medium | Open |
