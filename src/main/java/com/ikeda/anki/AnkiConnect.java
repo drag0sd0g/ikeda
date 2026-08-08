@@ -16,34 +16,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-/**
- * Reads the local Anki collection through the AnkiConnect add-on.
- *
- * <p>Read only. The Ikeda deck is built separately and nothing here writes to
- * the collection.
- */
 public final class AnkiConnect {
-
     private static final Logger log = LoggerFactory.getLogger(AnkiConnect.class);
 
     private static final String DEFAULT_ENDPOINT = "http://127.0.0.1:8765";
     private static final int API_VERSION = 6;
     private static final int BATCH_SIZE = 1000;
 
-    /**
-     * Fields that hold a headword, in preference order.
-     *
-     * <p>Order matters: the iKnow-derived note types keep the headword in
-     * {@code TargetKanji} and a whole example sentence in {@code Expression}, so
-     * checking {@code Expression} first would harvest sentences.
-     */
     private static final List<String> HEADWORD_FIELDS =
             List.of("TargetKanji", "Expression", "Front", "Word");
 
     private static final Pattern HTML_TAG = Pattern.compile("<[^>]+>");
     private static final Pattern VARIANT_SEPARATOR = Pattern.compile("[,、/／]");
 
-    /** Longer than this is a sentence or a grammar pattern, not a word. */
     private static final int MAX_HEADWORD_LENGTH = 12;
 
     private static final String[][] ENTITIES = {
@@ -65,7 +50,6 @@ public final class AnkiConnect {
         return new AnkiConnect(DEFAULT_ENDPOINT, HttpClient.newHttpClient());
     }
 
-    /** True when AnkiConnect answers, so callers can degrade rather than fail. */
     public boolean isAvailable() {
         try {
             invoke("version", null);
@@ -76,13 +60,6 @@ public final class AnkiConnect {
         }
     }
 
-    /**
-     * Every headword in the collection.
-     *
-     * <p>All of it counts as known, on the collection owner's instruction: the
-     * review metadata spans several backups and accounts over many years, so card
-     * maturity says nothing reliable about whether a word was learned.
-     */
     public List<String> headwords() {
         JsonNode ids = invoke("findNotes", MAPPER.createObjectNode().put("query", "deck:*"));
         var headwords = new ArrayList<String>();
@@ -103,7 +80,6 @@ public final class AnkiConnect {
         return List.copyOf(headwords);
     }
 
-    /** Package-private for testing: pulls usable headwords out of one note's fields. */
     static List<String> extractHeadwords(JsonNode note) {
         JsonNode fields = note.path("fields");
         for (String field : HEADWORD_FIELDS) {
@@ -125,14 +101,6 @@ public final class AnkiConnect {
         return List.of();
     }
 
-    /**
-     * Strips markup from a field value.
-     *
-     * <p>Anki stores fields as HTML, so an entity can survive either decoded or
-     * literal depending on how the note was authored or imported. Both forms are
-     * handled: a stray {@code &nbsp;} welded to a headword would otherwise stop
-     * it matching any corpus term.
-     */
     private static String clean(String value) {
         String text = HTML_TAG.matcher(value).replaceAll("");
         for (String[] entity : ENTITIES) {

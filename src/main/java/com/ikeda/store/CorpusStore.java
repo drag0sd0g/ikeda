@@ -18,26 +18,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * The corpus: filings, their narrative blocks, the prose sentences extracted from
- * them, and every content word occurrence.
- *
- * <p>Ingestion is atomic per filing. A filing is either fully present or entirely
- * absent, which together with {@link #hasFiling(String)} makes a run safe to
- * interrupt and resume — worth having when a full pass takes a quarter of an hour
- * of rate-limited downloading.
- */
 public final class CorpusStore {
-
     private static final Logger log = LoggerFactory.getLogger(CorpusStore.class);
 
     private final Database database;
 
-    /**
-     * Maps term key to primary key, so a repeated word costs a hash lookup rather
-     * than a database round trip. Cleared on rollback, because ids assigned inside
-     * an aborted transaction no longer exist.
-     */
     private final Map<String, Long> termIds = new HashMap<>();
 
     public CorpusStore(Database database) {
@@ -60,11 +45,6 @@ public final class CorpusStore {
         }
     }
 
-    /**
-     * Writes one filing and everything derived from it, as a single transaction.
-     *
-     * @param sentences must reference blocks by index into {@code blocks}
-     */
     public void ingestFiling(FilingRef filing,
                              List<NarrativeBlock> blocks,
                              List<AnalysedSentence> sentences) {
@@ -104,7 +84,6 @@ public final class CorpusStore {
         try (PreparedStatement statement = connection().prepareStatement(
                 "INSERT INTO block (doc_id, seq, element_id, text) VALUES (?, ?, ?, ?)",
                 Statement.RETURN_GENERATED_KEYS)) {
-
             for (int i = 0; i < blocks.size(); i++) {
                 NarrativeBlock block = blocks.get(i);
                 statement.setString(1, docId);
@@ -120,7 +99,6 @@ public final class CorpusStore {
 
     private void insertSentences(String docId, long[] blockIds, List<AnalysedSentence> sentences)
             throws SQLException {
-
         try (PreparedStatement insertSentence = connection().prepareStatement("""
                      INSERT INTO sentence (doc_id, block_id, seq, text, char_len, token_count)
                      VALUES (?, ?, ?, ?, ?, ?)
@@ -129,7 +107,6 @@ public final class CorpusStore {
                      INSERT INTO occurrence (term_id, sentence_id, doc_id, position)
                      VALUES (?, ?, ?, ?)
                      """)) {
-
             for (AnalysedSentence sentence : sentences) {
                 if (sentence.blockIndex() < 0 || sentence.blockIndex() >= blockIds.length) {
                     throw new SQLException("sentence references block index %d, only %d blocks"
@@ -152,8 +129,7 @@ public final class CorpusStore {
                     insertOccurrence.addBatch();
                 }
             }
-            // Occurrences outnumber sentences roughly fifteen to one and need no
-            // generated keys, so they are the one insert worth batching.
+
             insertOccurrence.executeBatch();
         }
     }
@@ -199,13 +175,6 @@ public final class CorpusStore {
                 database.count(Database.Table.OCCURRENCE));
     }
 
-    /**
-     * Terms ordered by how many filings they appear in.
-     *
-     * <p>The phase 1 exit criterion: this list should be dominated by 会社, 当社,
-     * 事業 and similar at near-total document frequency. That is the correct and
-     * uninteresting result.
-     */
     public List<TermFrequency> topTermsByDocumentFrequency(int limit) {
         try (PreparedStatement statement = connection().prepareStatement("""
                 SELECT t.key, t.pos, COUNT(*) AS corpus_freq,

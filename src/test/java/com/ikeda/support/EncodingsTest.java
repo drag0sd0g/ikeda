@@ -2,59 +2,67 @@ package com.ikeda.support;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class EncodingsTest {
 
-    private static final String SAMPLE = "要素ID\t値";
+    private static final String JAPANESE = "要素ID\t値";
+    private static final String ASCII = "docID\tvalue";
 
-    @Test
-    @DisplayName("decodes UTF-16LE with a BOM and strips the BOM")
-    void decodesUtf16LeWithBom() throws IOException {
-        byte[] bytes = withPrefix(new byte[]{(byte) 0xFF, (byte) 0xFE},
-                SAMPLE.getBytes(StandardCharsets.UTF_16LE));
+    enum Encoding {
+        UTF_16LE_WITH_BOM(StandardCharsets.UTF_16LE, new byte[]{(byte) 0xFF, (byte) 0xFE}),
+        UTF_16BE_WITH_BOM(StandardCharsets.UTF_16BE, new byte[]{(byte) 0xFE, (byte) 0xFF}),
+        UTF_16LE_NO_BOM(StandardCharsets.UTF_16LE, new byte[0]),
+        UTF_8(StandardCharsets.UTF_8, new byte[0]);
 
-        assertThat(Encodings.decode(bytes)).isEqualTo(SAMPLE);
+        private final Charset charset;
+        private final byte[] bom;
+
+        Encoding(Charset charset, byte[] bom) {
+            this.charset = charset;
+            this.bom = bom;
+        }
+
+        byte[] encode(String text) {
+            var out = new ByteArrayOutputStream();
+            try {
+                out.write(bom);
+                out.write(text.getBytes(charset));
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    @ParameterizedTest(name = "{0} round trips Japanese")
+    @EnumSource(Encoding.class)
+    void decodesJapanese(Encoding encoding) {
+        assertThat(Encodings.decode(encoding.encode(JAPANESE))).isEqualTo(JAPANESE);
+    }
+
+    @ParameterizedTest(name = "{0} round trips ASCII")
+    @EnumSource(Encoding.class)
+    void decodesAscii(Encoding encoding) {
+        assertThat(Encodings.decode(encoding.encode(ASCII))).isEqualTo(ASCII);
     }
 
     @Test
-    @DisplayName("decodes UTF-16BE with a BOM and strips the BOM")
-    void decodesUtf16BeWithBom() throws IOException {
-        byte[] bytes = withPrefix(new byte[]{(byte) 0xFE, (byte) 0xFF},
-                SAMPLE.getBytes(StandardCharsets.UTF_16BE));
-
-        assertThat(Encodings.decode(bytes)).isEqualTo(SAMPLE);
-    }
-
-    @Test
-    @DisplayName("decodes UTF-16LE without a BOM rather than defaulting to big-endian")
-    void decodesUtf16LeWithoutBom() {
-        byte[] bytes = SAMPLE.getBytes(StandardCharsets.UTF_16LE);
-
-        assertThat(Encodings.detect(bytes)).isEqualTo(StandardCharsets.UTF_16LE);
-        assertThat(Encodings.decode(bytes)).isEqualTo(SAMPLE);
-    }
-
-    @Test
-    @DisplayName("decodes ASCII UTF-16LE without a BOM, which is also valid UTF-8")
-    void decodesAsciiUtf16LeWithoutBom() {
-        byte[] bytes = "docID\tvalue".getBytes(StandardCharsets.UTF_16LE);
-
-        assertThat(Encodings.detect(bytes)).isEqualTo(StandardCharsets.UTF_16LE);
-        assertThat(Encodings.decode(bytes)).isEqualTo("docID\tvalue");
-    }
-
-    @Test
-    @DisplayName("falls back to UTF-8")
-    void decodesUtf8() {
-        byte[] bytes = SAMPLE.getBytes(StandardCharsets.UTF_8);
-
-        assertThat(Encodings.decode(bytes)).isEqualTo(SAMPLE);
+    @DisplayName("detects UTF-16LE without a BOM rather than defaulting to big-endian")
+    void detectsLittleEndianWithoutBom() {
+        assertThat(Encodings.detect(JAPANESE.getBytes(StandardCharsets.UTF_16LE)))
+                .isEqualTo(StandardCharsets.UTF_16LE);
+        assertThat(Encodings.detect(ASCII.getBytes(StandardCharsets.UTF_16LE)))
+                .isEqualTo(StandardCharsets.UTF_16LE);
     }
 
     @Test
@@ -62,12 +70,5 @@ class EncodingsTest {
     void toleratesShortInput() {
         assertThat(Encodings.decode(new byte[0])).isEmpty();
         assertThat(Encodings.decode(new byte[]{65})).isEqualTo("A");
-    }
-
-    private static byte[] withPrefix(byte[] prefix, byte[] body) throws IOException {
-        var out = new ByteArrayOutputStream();
-        out.write(prefix);
-        out.write(body);
-        return out.toByteArray();
     }
 }

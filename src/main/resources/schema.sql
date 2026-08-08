@@ -1,13 +1,3 @@
--- Ikeda corpus store, phase 1.
---
--- Only the tables needed to hold the corpus. The ranking tables described in
--- TDD section 6 (term_stat, known_lemma, candidate) arrive with phase 2, when
--- there is a corpus to rank; creating them empty now would only invite doubt
--- about whether they are populated.
---
--- Statements are separated by semicolons and executed one at a time, so no
--- semicolon may appear inside a literal or a comment.
-
 CREATE TABLE IF NOT EXISTS filing (
     doc_id           TEXT PRIMARY KEY,
     edinet_code      TEXT,
@@ -19,9 +9,6 @@ CREATE TABLE IF NOT EXISTS filing (
     ingested_at      TEXT NOT NULL
 );
 
--- Raw narrative sections, retained so segmentation rules can be changed and
--- replayed without re-fetching from EDINET, which is rate limited to one
--- request every four seconds.
 CREATE TABLE IF NOT EXISTS block (
     id         INTEGER PRIMARY KEY,
     doc_id     TEXT    NOT NULL REFERENCES filing(doc_id),
@@ -31,10 +18,6 @@ CREATE TABLE IF NOT EXISTS block (
     UNIQUE (doc_id, seq)
 );
 
--- UNIQUE(doc_id, text) is a backstop. Segmenter already removes the 15-28% of
--- sentences duplicated by consolidated and non-consolidated context pairs, so
--- this fires only if that is bypassed. Identical sentences in *different*
--- filings are kept deliberately: document frequency must count each filing.
 CREATE TABLE IF NOT EXISTS sentence (
     id          INTEGER PRIMARY KEY,
     doc_id      TEXT    NOT NULL REFERENCES filing(doc_id),
@@ -46,15 +29,6 @@ CREATE TABLE IF NOT EXISTS sentence (
     UNIQUE (doc_id, text)
 );
 
--- One row per distinct word across the whole corpus, keyed on the Sudachi
--- normalised form. Surface and reading are representative rather than
--- authoritative: a key can occur with several readings, and phase 3 will need
--- to resolve that before a reading reaches a card.
--- has_kanji is stored rather than tested at query time because SQLite has no
--- character-class matching for CJK. Terms written entirely in kana are never
--- candidates: katakana is English loanwords the learner reads for free, and
--- kana-only content words are grammatical scaffolding whose baseline ranks are
--- wrong. See Scripts.containsKanji for the measurements.
 CREATE TABLE IF NOT EXISTS term (
     id        INTEGER PRIMARY KEY,
     key       TEXT NOT NULL UNIQUE,
@@ -64,8 +38,6 @@ CREATE TABLE IF NOT EXISTS term (
     has_kanji INTEGER NOT NULL DEFAULT 1
 );
 
--- doc_id is denormalised from sentence because document frequency is
--- COUNT(DISTINCT doc_id) grouped by term, and that runs on every ranking pass.
 CREATE TABLE IF NOT EXISTS occurrence (
     id          INTEGER PRIMARY KEY,
     term_id     INTEGER NOT NULL REFERENCES term(id),
@@ -74,13 +46,6 @@ CREATE TABLE IF NOT EXISTS occurrence (
     position    INTEGER NOT NULL
 );
 
--- Words the learner already knows, from any source.
---
--- Kept separate from candidate.status so the two never overwrite each other: a
--- verdict is what the reviewer said about one word at one moment, whereas this
--- is a standing rule. Anki entries are loaded wholesale on the owner's
--- instruction that everything carded is known; review entries accumulate as the
--- reviewer works, and are what closes the gap no ranking can close.
 CREATE TABLE IF NOT EXISTS known_lemma (
     lemma      TEXT PRIMARY KEY,
     source     TEXT NOT NULL,
@@ -89,18 +54,6 @@ CREATE TABLE IF NOT EXISTS known_lemma (
 
 CREATE INDEX IF NOT EXISTS idx_known_lemma_source ON known_lemma(source);
 
--- A term proposed for review, with its corpus counts snapshotted so an exported
--- sheet stays meaningful even if the corpus is later re-ingested.
---
--- status is the reviewer's verdict. Re-populating candidates deliberately leaves
--- it untouched: verdicts are expensive to produce and must survive a rebuild.
---
--- bccwj_rank is frequency rank in general written Japanese, 1 being commonest.
--- It is the only feature that survived testing as a predictor of what the
--- learner does not know (AUC 0.73); corpus frequency, document frequency, word
--- length and register all failed. NULL means the word is absent from the
--- baseline, which is usually a tokenisation mismatch on a compound rather than
--- evidence of rarity, so it must not be treated as "infinitely rare".
 CREATE TABLE IF NOT EXISTS candidate (
     term_id             INTEGER PRIMARY KEY REFERENCES term(id),
     corpus_frequency    INTEGER NOT NULL,
@@ -114,10 +67,8 @@ CREATE TABLE IF NOT EXISTS candidate (
 CREATE INDEX IF NOT EXISTS idx_candidate_status ON candidate(status);
 CREATE INDEX IF NOT EXISTS idx_candidate_rank ON candidate(bccwj_rank);
 
--- Covers corpus frequency and document frequency in one index scan.
 CREATE INDEX IF NOT EXISTS idx_occurrence_term_doc ON occurrence(term_id, doc_id);
 
--- Covers "which terms are in this sentence", used by the i+1 example filter.
 CREATE INDEX IF NOT EXISTS idx_occurrence_sentence ON occurrence(sentence_id);
 
 CREATE INDEX IF NOT EXISTS idx_sentence_doc ON sentence(doc_id);

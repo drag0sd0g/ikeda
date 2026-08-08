@@ -16,14 +16,7 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/**
- * Extracts narrative sections from an EDINET XBRL-to-CSV bundle.
- *
- * <p>Pure with respect to I/O: it takes the bundle as bytes, so the whole parsing
- * path is unit-testable without a network call or an API key.
- */
 public final class NarrativeExtractor {
-
     private static final Logger log = LoggerFactory.getLogger(NarrativeExtractor.class);
 
     private static final String COLUMN_ELEMENT_ID = "要素ID";
