@@ -8,3 +8,6 @@ dict/
 ikeda.db
 ikeda.db-shm
 ikeda.db-wal
+# Regenerable / not redistributable
+anki_known.txt
+baseline/

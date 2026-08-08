@@ -99,6 +99,37 @@ class SegmenterTest {
     }
 
     @Test
+    @DisplayName("gives an inflected word the reading of its dictionary form")
+    void resolvesDictionaryFormReading() {
+        // readingForm() returns the reading of the SURFACE, so 晒される keyed as
+        // 晒す would otherwise carry サラサ, and 見て keyed as 見る would carry ミ.
+        var block = new NarrativeBlock("jpcrp_cor:BusinessRisksTextBlock",
+                "信用リスクに晒されており、状況を見ております。");
+
+        var terms = segmenter.segment(List.of(block)).analysed().getFirst().terms();
+
+        assertThat(terms)
+                .filteredOn(t -> t.key().equals("晒す"))
+                .allSatisfy(t -> assertThat(t.reading()).isEqualTo("サラス"));
+        assertThat(terms)
+                .filteredOn(t -> t.key().equals("見る"))
+                .allSatisfy(t -> assertThat(t.reading()).isEqualTo("ミル"));
+    }
+
+    @Test
+    @DisplayName("leaves uninflected words with their own reading")
+    void keepsUninflectedReading() {
+        var block = new NarrativeBlock("jpcrp_cor:BusinessRisksTextBlock",
+                "将来の課税所得が生じる蓋然性を勘案しております。");
+
+        var terms = segmenter.segment(List.of(block)).analysed().getFirst().terms();
+
+        assertThat(terms)
+                .filteredOn(t -> t.key().equals("蓋然性"))
+                .allSatisfy(t -> assertThat(t.reading()).isEqualTo("ガイゼンセイ"));
+    }
+
+    @Test
     @DisplayName("contentWords keeps nouns and verbs, drops particles and numerals")
     void filtersContentWords() {
         var block = new NarrativeBlock("jpcrp_cor:BusinessRisksTextBlock",

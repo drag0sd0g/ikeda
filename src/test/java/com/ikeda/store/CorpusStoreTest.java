@@ -17,17 +17,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CorpusStoreTest {
 
+    private Database database;
     private CorpusStore store;
 
     @BeforeEach
     void setUp() {
-        store = CorpusStore.inMemory();
+        database = Database.inMemory();
+        store = new CorpusStore(database);
     }
 
     @AfterEach
     void tearDown() {
-        if (store != null) {
-            store.close();
+        if (database != null) {
+            database.close();
         }
     }
 
@@ -217,8 +219,8 @@ class CorpusStoreTest {
         @Test
         @DisplayName("applying the schema twice is harmless")
         void schemaIsIdempotent() {
-            try (CorpusStore reopened = CorpusStore.inMemory()) {
-                assertThat(reopened.stats().filings()).isZero();
+            try (Database reopened = Database.inMemory()) {
+                assertThat(new CorpusStore(reopened).stats().filings()).isZero();
             }
         }
     }
