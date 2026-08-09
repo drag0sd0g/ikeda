@@ -187,8 +187,11 @@ public final class Database implements AutoCloseable {
     int update(String sql, Sql.Binder binder) {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             binder.bind(statement);
-            return statement.executeUpdate();
+            int changed = statement.executeUpdate();
+            connection.commit();
+            return changed;
         } catch (SQLException e) {
+            rollbackQuietly();
             throw new StoreException("update failed: " + summarise(sql), e);
         }
     }

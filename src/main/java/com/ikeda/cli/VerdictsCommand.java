@@ -2,16 +2,14 @@ package com.ikeda.cli;
 
 import com.ikeda.review.CandidateStatus;
 import com.ikeda.review.ReviewSheet;
-import com.ikeda.store.CandidateStore;
 import com.ikeda.store.Database;
-import com.ikeda.store.KnownLemmaStore;
+import com.ikeda.store.VerdictRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 
 @Command(name = "verdicts", description = "Read a reviewed sheet back.")
@@ -37,15 +35,7 @@ public final class VerdictsCommand implements Runnable {
                 ReviewSheet.readVerdicts(Workspace.read(sheet));
 
         try (Database database = workspace.openDatabase()) {
-            int updated = new CandidateStore(database).recordVerdicts(verdicts);
-
-            List<String> nowKnown = verdicts.entrySet().stream()
-                    .filter(entry -> entry.getValue() == CandidateStatus.KNOWN)
-                    .map(Map.Entry::getKey)
-                    .toList();
-            if (!nowKnown.isEmpty()) {
-                new KnownLemmaStore(database).add(nowKnown, "review");
-            }
+            int updated = new VerdictRecorder(database).record(verdicts);
 
             log.info("read {} verdicts from {}, applied {}", verdicts.size(), sheet, updated);
             Reporting.verdicts(database);

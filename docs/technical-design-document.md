@@ -281,7 +281,15 @@ candidate(term_id PK, corpus_frequency, document_frequency, bccwj_rank, effectiv
 
 The ranking predicts what the reader does not know. It cannot be right about a specific person from population statistics alone, and the residual is only obtainable by asking.
 
-A batch is written as a tab-separated sheet — word, reading, part of speech, document frequency, corpus frequency, example sentence, and an empty verdict column. The reader marks each row and the sheet is read back. A file round trip rather than an interface, because a spreadsheet already sorts, filters and hides columns better than anything worth building.
+Reviewing happens through a local web interface, served by the process itself and reachable only from the machine it runs on. One word is shown at a time with its reading, its frequency in the corpus, its rarity in general Japanese, the parts it decomposes into when it is a compound, and several example sentences drawn from different filings.
+
+Three properties of the interface follow from what the task actually is:
+
+- **Verdicts are single keystrokes.** The time cost of review is dominated by deciding, not by recording, so the recording must disappear.
+- **The meaning is hidden until asked for.** Showing an English gloss before the reader has committed turns a recall judgement into a recognition one, and recognition overstates knowledge.
+- **Every verdict is written immediately and can be undone.** There is no save step and therefore nothing to lose, and a mistaken keystroke is recoverable rather than permanent.
+
+A tab-separated sheet remains available for the same purpose, for bulk work in a spreadsheet. Both paths record verdicts through the same component, so they cannot diverge in behaviour.
 
 Verdicts are the project's most expensive artifact: they cost human attention and cannot be regenerated. They are preserved across corpus rebuilds, and a `KNOWN` verdict is promoted into the known set so the word is never proposed again. That mechanism is what closes the gap no ranking can close — the known set grows with every session.
 

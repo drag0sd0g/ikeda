@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ikeda — review</title>
+<style>
+  :root {
+    --bg: #faf9f7; --panel: #ffffff; --ink: #1a1a1a; --muted: #8a8580;
+    --line: #e6e2dc; --known: #6b7f8f; --worth: #4a7c59; --skip: #a8756b;
+    --accent: #2c2c2c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181a; --panel: #1e2124; --ink: #e8e6e3; --muted: #8f8b86;
+      --line: #2e3236; --known: #7d94a6; --worth: #6aa87d; --skip: #c08e83;
+      --accent: #e8e6e3;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 1rem;
+    padding: .75rem 1.25rem; border-bottom: 1px solid var(--line);
+    font-size: .8rem; color: var(--muted);
+  }
+  .bar { flex: 1; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--worth); width: 0; transition: width .3s; }
+  main { flex: 1; display: flex; justify-content: center; padding: 2rem 1.25rem; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    width: min(760px, 100%); padding: 2rem 2.25rem;
+  }
+  .term { font-size: 3.4rem; font-weight: 600; line-height: 1.15; letter-spacing: .02em; }
+  .reading { font-size: 1.15rem; color: var(--muted); margin-top: .4rem; }
+  .facts { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.25rem 0; }
+  .fact {
+    font-size: .75rem; padding: .25rem .6rem; border: 1px solid var(--line);
+    border-radius: 999px; color: var(--muted);
+  }
+  .meaning {
+    margin: 1rem 0; padding: .9rem 1rem; border-left: 3px solid var(--line);
+    font-size: 1rem; color: var(--ink);
+  }
+  .meaning.hidden { color: var(--muted); font-style: italic; }
+  .examples { margin-top: 1.5rem; border-top: 1px solid var(--line); padding-top: 1.25rem; }
+  .example { margin-bottom: 1rem; }
+  .example p { margin: 0; font-size: 1.05rem; line-height: 1.7; }
+  .example .src { font-size: .72rem; color: var(--muted); margin-top: .25rem; }
+  mark { background: rgba(106,168,125,.28); color: inherit; padding: 0 .1em; border-radius: 2px; }
+  .keys { display: flex; gap: .6rem; margin-top: 1.75rem; flex-wrap: wrap; }
+  .key {
+    flex: 1; min-width: 130px; border: 1px solid var(--line); border-radius: 8px;
+    background: transparent; color: var(--ink); padding: .7rem .5rem; cursor: pointer;
+    font-family: inherit; font-size: .85rem; text-align: center;
+  }
+  .key:hover { border-color: var(--accent); }
+  .key b { display: block; font-size: 1.1rem; margin-bottom: .15rem; }
+  .key.k b { color: var(--known); } .key.w b { color: var(--worth); } .key.n b { color: var(--skip); }
+  footer { padding: .75rem 1.25rem; border-top: 1px solid var(--line);
+           font-size: .72rem; color: var(--muted); text-align: center; }
+  .done { text-align: center; padding: 4rem 1rem; color: var(--muted); }
+  kbd { border: 1px solid var(--line); border-radius: 4px; padding: .05rem .35rem; font-size: .95em; }
+</style>
+</head>
+<body>
+<header>
+  <strong id="counts">—</strong>
+  <div class="bar"><span id="progress"></span></div>
+  <span id="session">0 this session</span>
+</header>
+
+<main><div id="root"></div></main>
+
+<footer>
+  <kbd>k</kbd> know it · <kbd>w</kbd> worth a card · <kbd>n</kbd> not worth it ·
+  <kbd>space</kbd> reveal meaning · <kbd>u</kbd> undo
+</footer>
+
+<script>
+const state = { queue: [], index: 0, history: [], session: 0, revealed: false };
+
+const api = (path, body) => fetch(path, {
+  method: body ? "POST" : "GET",
+  headers: { "Content-Type": "application/json" },
+  body: body ? JSON.stringify(body) : undefined,
+}).then(r => r.json());
+
+const escape = s => (s ?? "").replace(/[&<>"]/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function highlight(sentence, term) {
+  const safe = escape(sentence);
+  if (!term) return safe;
+  const parts = safe.split(escape(term));
+  return parts.length > 1 ? parts.join(`<mark>${escape(term)}</mark>`) : safe;
+}
+
+function rarity(rank) {
+  if (rank === null || rank === undefined) return "not in the reference corpus";
+  if (rank < 5000) return `common in general Japanese (#${rank.toLocaleString()})`;
+  if (rank < 20000) return `uncommon in general Japanese (#${rank.toLocaleString()})`;
+  return `rare in general Japanese (#${rank.toLocaleString()})`;
+}
+
+function render() {
+  const root = document.getElementById("root");
+  const item = state.queue[state.index];
+
+  if (!item) {
+    root.innerHTML = `<div class="done"><p>Nothing left in the queue.</p>
+      <p>Run <code>sample</code> again, or <code>cards</code> to build what you kept.</p></div>`;
+    return;
+  }
+
+  const facts = [
+    `${item.documentFrequency} filings`,
+    `${item.corpusFrequency} occurrences`,
+    rarity(item.baselineRank),
+  ];
+  if (item.parts && item.parts.length) facts.push(`parts: ${item.parts.join(" + ")}`);
+
+  root.innerHTML = `
+    <div class="card">
+      <div class="term">${escape(item.term)}</div>
+      <div class="reading">${escape(item.reading)}</div>
+      <div class="facts">${facts.map(f => `<span class="fact">${escape(f)}</span>`).join("")}</div>
+      <div class="meaning ${state.revealed ? "" : "hidden"}" id="meaning">
+        ${state.revealed
+          ? (escape(item.meaning) || "no dictionary entry")
+          : "meaning hidden — press space to reveal"}
+      </div>
+      <div class="examples">
+        ${item.examples.map(e => `<div class="example">
+            <p>${highlight(e.text, item.term)}</p>
+            <div class="src">${escape(e.source)}</div>
+          </div>`).join("") || '<p class="src">no example sentence found</p>'}
+      </div>
+      <div class="keys">
+        <button class="key k" onclick="verdict('k')"><b>K</b>I know this</button>
+        <button class="key w" onclick="verdict('w')"><b>W</b>Worth a card</button>
+        <button class="key n" onclick="verdict('n')"><b>N</b>Not worth it</button>
+      </div>
+    </div>`;
+}
+
+async function verdict(code) {
+  const item = state.queue[state.index];
+  if (!item) return;
+  state.history.push(item.term);
+  state.session += 1;
+  state.index += 1;
+  state.revealed = false;
+  render();
+  await api("/api/verdict", { term: item.term, verdict: code });
+  refreshProgress();
+  if (state.index >= state.queue.length) load();
+}
+
+async function undo() {
+  const term = state.history.pop();
+  if (!term) return;
+  await api("/api/undo", { term });
+  state.index = Math.max(0, state.index - 1);
+  state.session = Math.max(0, state.session - 1);
+  state.revealed = false;
+  render();
+  refreshProgress();
+}
+
+async function refreshProgress() {
+  const p = await api("/api/progress");
+  const decided = (p.KNOWN || 0) + (p.WORTH_LEARNING || 0) + (p.NOT_WORTH_LEARNING || 0);
+  const total = decided + (p.PENDING || 0);
+  document.getElementById("counts").textContent =
+    `${decided.toLocaleString()} of ${total.toLocaleString()} reviewed`;
+  document.getElementById("progress").style.width = total ? `${(decided / total) * 100}%` : "0";
+  document.getElementById("session").textContent = `${state.session} this session`;
+}
+
+async function load() {
+  state.queue = await api("/api/queue");
+  state.index = 0;
+  render();
+}
+
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (key === " " || e.code === "Space") {
+    e.preventDefault();
+    state.revealed = !state.revealed;
+    render();
+  } else if (["k", "w", "n"].includes(key)) {
+    e.preventDefault();
+    verdict(key);
+  } else if (key === "u") {
+    e.preventDefault();
+    undo();
+  }
+});
+
+load().then(refreshProgress);
+</script>
+</body>
+</html>
