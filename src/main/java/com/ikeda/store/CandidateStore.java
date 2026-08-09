@@ -2,6 +2,7 @@ package com.ikeda.store;
 
 import com.ikeda.analyse.PartOfSpeech;
 import com.ikeda.rank.BaselineRanking;
+import com.ikeda.rank.PartwiseRank;
 import com.ikeda.review.Candidate;
 import com.ikeda.review.CandidateStatus;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.EnumMap;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 
@@ -67,7 +69,8 @@ public final class CandidateStore {
                               WHERE key IN (SELECT lemma FROM known_lemma))
             """;
 
-    private record RankedTerm(long termId, String lemma) { }
+    private record RankedTerm(long termId, String lemma, boolean compound,
+                              List<String> parts, List<String> shortUnits) { }
 
     private final Database database;
 
@@ -102,34 +105,49 @@ public final class CandidateStore {
     }
 
     private void assignRanks(BaselineRanking baseline) throws SQLException {
-        List<RankedTerm> terms = database.query(
-                "SELECT c.term_id, t.key FROM candidate c JOIN term t ON t.id = c.term_id",
+        List<RankedTerm> terms = database.query("""
+                        SELECT c.term_id, t.key, t.is_compound, t.part_keys, t.part_units
+                        FROM candidate c JOIN term t ON t.id = c.term_id
+                        """,
                 Sql.Binder.NONE,
-                row -> new RankedTerm(row.getLong("term_id"), row.getString("key")));
+                row -> new RankedTerm(row.getLong("term_id"), row.getString("key"),
+                        row.getInt("is_compound") == 1,
+                        CompoundStore.partsOf(row.getString("part_keys")),
+                        CompoundStore.partsOf(row.getString("part_units"))));
 
-        int scored = 0;
+        var partwise = new PartwiseRank(baseline);
+        int measured = 0;
+        int estimated = 0;
+
         try (PreparedStatement update = database.connection().prepareStatement(
-                "UPDATE candidate SET bccwj_rank = ? WHERE term_id = ?")) {
+                "UPDATE candidate SET bccwj_rank = ?, effective_rank = ? WHERE term_id = ?")) {
             for (RankedTerm term : terms) {
-                var rank = baseline.rankOf(term.lemma());
-                if (rank.isPresent()) {
-                    update.setInt(1, rank.get());
-                    scored++;
-                } else {
-                    update.setNull(1, Types.INTEGER);
-                }
-                update.setLong(2, term.termId());
+                Optional<Integer> direct = baseline.rankOf(term.lemma());
+                Optional<Integer> effective = direct.isPresent() ? direct
+                        : term.compound() ? partwise.estimate(term.shortUnits())
+                        : Optional.empty();
+
+                setNullable(update, 1, direct);
+                setNullable(update, 2, effective);
+                update.setLong(3, term.termId());
                 update.addBatch();
+
+                if (direct.isPresent()) {
+                    measured++;
+                } else if (effective.isPresent()) {
+                    estimated++;
+                }
             }
             update.executeBatch();
         }
-        log.info("baseline ranks: {} of {} candidates scored", scored, terms.size());
+        log.info("ranks: {} measured, {} estimated from parts, {} unscored",
+                measured, estimated, terms.size() - measured - estimated);
     }
 
     public List<Candidate> nextBatch(int limit) {
         return database.query(SELECT_CANDIDATES + """
                         WHERE c.status = 'PENDING'
-                        ORDER BY c.bccwj_rank IS NULL, c.bccwj_rank DESC,
+                        ORDER BY c.effective_rank IS NULL, c.effective_rank DESC,
                                  c.corpus_frequency DESC
                         LIMIT ?
                         """,
@@ -177,6 +195,15 @@ public final class CandidateStore {
                                 row.getLong("total")))
                 .forEach(entry -> counts.put(entry.getKey(), entry.getValue()));
         return counts;
+    }
+
+    private static void setNullable(PreparedStatement statement, int index, Optional<Integer> value)
+            throws SQLException {
+        if (value.isPresent()) {
+            statement.setInt(index, value.get());
+        } else {
+            statement.setNull(index, Types.INTEGER);
+        }
     }
 
     public long count() {

@@ -189,9 +189,9 @@ Domain vocabulary is systematically absent from a general-purpose dictionary, so
 
   A run is scored by its **weakest link**: the minimum PMI across its adjacent pairs. A chain is only as bonded as its loosest join, so a run containing one incidental adjacency is rejected regardless of how tightly its other parts cohere.
 
-**Accept and store.** Runs clearing both thresholds are stored as terms with their parts recorded, and occurrences are attributed to the sentences they were found in. Both thresholds are corpus-dependent and configurable.
+**Accept and store.** Runs clearing both thresholds are stored as terms, and occurrences are attributed to the sentences they were found in. Both thresholds are corpus-dependent and configurable.
 
-Retaining the parts matters beyond provenance: a compound whose meaning follows from parts the reader already knows is cheap to acquire, while an opaque one is not, and the parts are what make that judgement possible.
+Two forms of each part are recorded: the surface, which is what the compound is spelled from, and the *short-unit* decomposition, which is what a frequency baseline can be queried with. The second is what allows a compound with no baseline entry of its own to be ranked from its constituents (§5.8) — a compound whose meaning follows from parts the reader already knows is cheap to acquire, while an opaque one is not.
 
 ### 5.7 Candidate promotion
 
@@ -213,9 +213,13 @@ The dispersion floor is the single most effective filter, removing roughly three
 
 The reasoning is stated in §2.4. A reader who acquired Japanese through immersion and general study has gaps precisely where a word is common in professional writing but rare in everyday writing. Rarity in a balanced corpus is therefore a proxy for *unknown-ness*, and combining it with the corpus-internal filters of §5.7 approximates "common here, unfamiliar to you".
 
-Two properties of the implementation are load-bearing:
+Three properties of the implementation are load-bearing.
 
-**Absence from the baseline is not rarity.** A substantial share of candidates cannot be looked up at all, because they are compounds the reference corpus segments into shorter units. Treating absence as maximal rarity would place the least suitable candidates first. Unscored candidates are ranked **last**.
+**Absence from the baseline is never evidence of rarity.** A reference corpus and a morphological analyser disagree about word boundaries and about orthography: one segments 不動産 into two units while the other treats it as one, and one spells a stem 繰延 while the other spells it 繰り延べ. A lookup miss therefore usually means the two disagree, not that the word is rare. This rule is applied consistently at every level — a whole word that cannot be found is ranked last rather than first, and a compound part that cannot be found is ignored rather than counted as maximally rare.
+
+**Compounds are ranked from their parts.** A reconstructed compound has no entry in the baseline by construction, so ranking it by measured rarity would bury every domain term behind every single word. Instead its rank is estimated as the rarity of its **rarest constituent**, matching the intuition that a compound is only as hard as its least familiar part. A compound of everyday parts is transparent and sinks; one containing a specialist morpheme rises.
+
+For this to work the constituents must be compared at the granularity the baseline uses. Reference frequency lists are built on *short units*, while compound detection operates on *long units*, so each part is decomposed to short units before lookup. Without this step a part that is itself a merged unit — 会計年度, 引当金, 予約権 — fails to match, even though its own constituents are common.
 
 **Lookup is by written form only.** Matching on reading as a fallback repairs the case where the reference corpus canonicalises a word to a different spelling, but it collapses homophones, and Japanese has many. The cure is worse than the disease.
 
@@ -248,19 +252,22 @@ block(id PK, doc_id FK, seq, element_id, text)
 sentence(id PK, doc_id FK, block_id FK, seq, text, char_len, token_count,
          UNIQUE(doc_id, text))
 
-term(id PK, key UNIQUE, surface, reading, pos, has_kanji, is_compound, part_keys)
+term(id PK, key UNIQUE, surface, reading, pos, has_kanji,
+     is_compound, part_keys, part_units)
 
 occurrence(id PK, term_id FK, sentence_id FK, doc_id, position)
 
 known_lemma(lemma PK, source, first_seen)
 
-candidate(term_id PK, corpus_frequency, document_frequency, bccwj_rank,
+candidate(term_id PK, corpus_frequency, document_frequency, bccwj_rank, effective_rank,
           example_sentence_id, status, decided_at, exported_at)
 ```
 
 **Raw narrative blocks are retained** so segmentation rules can change and be replayed without re-fetching, which is expensive under the API's rate limit.
 
 **`doc_id` is denormalised onto `occurrence`** because document frequency is a distinct count grouped by term, and that query runs on every ranking pass.
+
+**`bccwj_rank` holds only measured rarity and `effective_rank` holds what the queue orders by** — the measured value where one exists, the estimate from constituents otherwise. Keeping them apart preserves the distinction between what was looked up and what was inferred.
 
 **`has_kanji` is stored rather than computed** because SQLite has no character-class matching for CJK.
 

@@ -101,9 +101,18 @@ class ExampleSelectorTest {
     }
 
     @Test
-    @DisplayName("returns nothing when no sentence contains the word")
-    void handlesNoMatch() {
-        assertThat(selector.select("余資", List.of(sentence(1, "為替変動のリスクです。", "為替")), Set.of()))
-                .isEmpty();
+    @DisplayName("accepts a sentence where the word appears inflected, not in dictionary form")
+    void acceptsInflectedOccurrences() {
+        var inflected = sentence(1, "信用リスクに晒されており、影響を受ける可能性があります。",
+                "晒す", "信用", "影響");
+
+        assertThat(selector.select("晒す", List.of(inflected), Set.of("信用", "影響")))
+                .map(ExampleSelector.SentenceContext::sentenceId).contains(1L);
+    }
+
+    @Test
+    @DisplayName("returns nothing when there are no sentences to choose from")
+    void handlesNoCandidates() {
+        assertThat(selector.select("余資", List.of(), Set.of())).isEmpty();
     }
 }

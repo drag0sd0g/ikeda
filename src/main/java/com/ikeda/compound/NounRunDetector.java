@@ -3,6 +3,7 @@ package com.ikeda.compound;
 import com.ikeda.analyse.PartOfSpeech;
 import com.ikeda.support.Scripts;
 import com.worksap.nlp.sudachi.Morpheme;
+import com.worksap.nlp.sudachi.Tokenizer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,7 +47,17 @@ public final class NounRunDetector {
             return;
         }
         List<String> parts = run.stream().map(Morpheme::surface).toList();
-        found.add(new CompoundCandidate(String.join("", parts), parts));
+        List<String> shortUnits = run.stream()
+                .flatMap(morpheme -> shortUnitsOf(morpheme).stream())
+                .toList();
+        found.add(new CompoundCandidate(String.join("", parts), parts, shortUnits));
+    }
+
+    private static List<String> shortUnitsOf(Morpheme morpheme) {
+        List<Morpheme> split = morpheme.split(Tokenizer.SplitMode.A);
+        return split.size() <= 1
+                ? List.of(morpheme.normalizedForm())
+                : split.stream().map(Morpheme::normalizedForm).toList();
     }
 
     private static boolean isRunnable(Morpheme morpheme) {

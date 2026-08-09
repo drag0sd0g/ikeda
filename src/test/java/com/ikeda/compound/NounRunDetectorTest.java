@@ -57,6 +57,16 @@ class NounRunDetectorTest {
     }
 
     @Test
+    @DisplayName("records short units, which is the granularity a frequency baseline uses")
+    void recordsShortUnits() {
+        CompoundCandidate compound = detect("繰延税金資産の回収可能性を判断しております。").stream()
+                .filter(c -> c.surface().equals("繰延税金資産"))
+                .findFirst().orElseThrow();
+
+        assertThat(compound.shortUnits()).contains("税金", "資産");
+    }
+
+    @Test
     @DisplayName("keeps the parts, so compositionality can be judged later")
     void keepsParts() {
         CompoundCandidate compound = detect("繰延税金資産の回収可能性を判断しております。").stream()

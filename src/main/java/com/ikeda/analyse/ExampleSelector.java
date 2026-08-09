@@ -33,7 +33,6 @@ public final class ExampleSelector {
                                             Set<String> known) {
         return sentences.stream()
                 .map(ExampleSelector::withHeadingStripped)
-                .filter(sentence -> sentence.text().contains(target))
                 .filter(this::withinLengthBounds)
                 .filter(ExampleSelector::withoutOpeningAnaphora)
                 .min(Comparator
