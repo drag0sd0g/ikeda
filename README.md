@@ -1,5 +1,7 @@
 # Ikeda
 
+<img width="1254" height="1254" alt="ikeda_logo" src="https://github.com/user-attachments/assets/bf9e1e31-e7b3-4f07-a076-955577c721ab" />
+
 Finds the financial-Japanese vocabulary you don't know yet.
 
 Ikeda reads Japanese annual reports (有価証券報告書) from EDINET, works out which words in them you're missing, ranks them so the useful ones come first, and turns the result into Anki cards carrying real sentences from real filings.
