@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public final class Baseline implements BaselineRanking {
     private static final Logger log = LoggerFactory.getLogger(Baseline.class);
@@ -62,6 +63,14 @@ public final class Baseline implements BaselineRanking {
     @Override
     public Optional<Integer> rankOf(String lemma) {
         return Optional.ofNullable(ranks.get(lemma));
+    }
+
+    @Override
+    public Set<String> commonest(int limit) {
+        return ranks.entrySet().stream()
+                .filter(entry -> entry.getValue() <= limit)
+                .map(Map.Entry::getKey)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     public int size() {

@@ -25,7 +25,17 @@ class CandidateStoreTest {
     private static final BaselineRanking NO_RANKS = BaselineRanking.NONE;
 
     private static BaselineRanking ranking(Map<String, Integer> ranks) {
-        return lemma -> Optional.ofNullable(ranks.get(lemma));
+        return new BaselineRanking() {
+            @Override
+            public java.util.Optional<Integer> rankOf(String lemma) {
+                return java.util.Optional.ofNullable(ranks.get(lemma));
+            }
+
+            @Override
+            public java.util.Set<String> commonest(int limit) {
+                return java.util.Set.of();
+            }
+        };
     }
 
     private Database database;

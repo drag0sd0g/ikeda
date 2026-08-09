@@ -78,6 +78,9 @@ public final class Database implements AutoCloseable {
 
     private void migrate() throws SQLException {
         addColumnIfMissing("candidate", "bccwj_rank", "INTEGER");
+        addColumnIfMissing("candidate", "exported_at", "TEXT");
+        addColumnIfMissing("term", "is_compound", "INTEGER NOT NULL DEFAULT 0");
+        addColumnIfMissing("term", "part_keys", "TEXT");
         if (addColumnIfMissing("term", "has_kanji", "INTEGER NOT NULL DEFAULT 1")) {
             backfillHasKanji();
         }

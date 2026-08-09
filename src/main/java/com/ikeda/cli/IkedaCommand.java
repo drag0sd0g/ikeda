@@ -13,6 +13,8 @@ import picocli.CommandLine.Command;
                 SampleCommand.class,
                 ExportCommand.class,
                 VerdictsCommand.class,
+                CompoundsCommand.class,
+                CardsCommand.class,
                 StatusCommand.class,
         })
 public final class IkedaCommand implements Runnable {

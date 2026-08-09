@@ -1,10 +1,23 @@
 package com.ikeda.rank;
 
 import java.util.Optional;
+import java.util.Set;
 
-@FunctionalInterface
 public interface BaselineRanking {
-    BaselineRanking NONE = lemma -> Optional.empty();
+
+    BaselineRanking NONE = new BaselineRanking() {
+        @Override
+        public Optional<Integer> rankOf(String lemma) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Set<String> commonest(int limit) {
+            return Set.of();
+        }
+    };
 
     Optional<Integer> rankOf(String lemma);
+
+    Set<String> commonest(int limit);
 }

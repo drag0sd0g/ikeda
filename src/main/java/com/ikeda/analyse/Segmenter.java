@@ -5,6 +5,7 @@ import com.worksap.nlp.sudachi.Config;
 import com.worksap.nlp.sudachi.Dictionary;
 import com.worksap.nlp.sudachi.DictionaryFactory;
 import com.worksap.nlp.sudachi.Morpheme;
+import com.worksap.nlp.sudachi.MorphemeList;
 import com.worksap.nlp.sudachi.Tokenizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -68,6 +69,10 @@ public final class Segmenter implements AutoCloseable {
         public List<AnalysedSentence> analysed() {
             return sentences.stream().map(s -> s.analysed(readings)).toList();
         }
+    }
+
+    public Iterable<MorphemeList> tokenize(String text) {
+        return tokenizer.tokenizeSentences(Tokenizer.SplitMode.C, text);
     }
 
     public ReadingResolver readings() {

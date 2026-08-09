@@ -11,3 +11,5 @@ ikeda.db-wal
 # Regenerable / not redistributable
 anki_known.txt
 baseline/
+
+dictionary/
