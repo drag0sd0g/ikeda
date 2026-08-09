@@ -17,7 +17,7 @@ import java.util.List;
 public final class SampleCommand implements Runnable {
     private static final Logger log = LoggerFactory.getLogger(SampleCommand.class);
 
-    static final int MIN_DOCUMENT_FREQUENCY = 9;
+    static final double DISPERSION_FRACTION = 0.05;
 
     @Option(names = {"-n", "--size"}, description = "Candidates to write.")
     int size = 150;
@@ -39,7 +39,7 @@ public final class SampleCommand implements Runnable {
     public void run() {
         try (Database database = workspace.openDatabase()) {
             var candidates = new CandidateStore(database);
-            candidates.populate(MIN_DOCUMENT_FREQUENCY, workspace.baseline());
+            candidates.populate(DISPERSION_FRACTION, workspace.baseline());
 
             List<Candidate> batch = candidates.nextBatch(size);
             Workspace.write(out, ReviewSheet.write(batch));

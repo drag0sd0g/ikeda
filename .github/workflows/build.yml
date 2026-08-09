@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Cache the Sudachi dictionary
+        id: dictionary
+        uses: actions/cache@v4
+        with:
+          path: dict
+          key: sudachidict-core-v1
+
+      - name: Download the Sudachi dictionary
+        if: steps.dictionary.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p dict
+          curl -sSL --retry 3 \
+            http://sudachi.s3-website-ap-northeast-1.amazonaws.com/sudachidict/sudachi-dictionary-latest-core.zip \
+            -o /tmp/dict.zip
+          unzip -j -q /tmp/dict.zip '*/system_core.dic' -d dict/
+
+      - name: Build
+        uses: gradle/actions/setup-gradle@v4
+
+      - run: ./gradlew build --no-daemon
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/reports/tests/test
+          if-no-files-found: ignore

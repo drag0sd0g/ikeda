@@ -64,6 +64,29 @@ class CandidateStoreTest {
     }
 
     @Test
+    @DisplayName("derives the dispersion floor from the size of the corpus")
+    void derivesDispersionFloorFromCorpusSize() {
+        ingestAcross(20, "広く出る語");
+        ingestAcross(2, "狭く出る語");
+
+        candidates.populate(0.5, NO_RANKS);
+
+        assertThat(candidates.nextBatch(10))
+                .extracting(Candidate::key)
+                .containsExactly("広く出る語");
+    }
+
+    @Test
+    @DisplayName("keeps a floor of two filings however small the corpus")
+    void keepsAMinimumFloor() {
+        ingestAcross(1, "一度きりの語");
+
+        candidates.populate(0.0001, NO_RANKS);
+
+        assertThat(candidates.nextBatch(10)).isEmpty();
+    }
+
+    @Test
     @DisplayName("promotes only terms meeting the dispersion floor")
     void appliesDispersionFloor() {
         // 蓋然性 in five filings, 独自語 in one.
