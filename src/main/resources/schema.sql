@@ -30,12 +30,14 @@ CREATE TABLE IF NOT EXISTS sentence (
 );
 
 CREATE TABLE IF NOT EXISTS term (
-    id        INTEGER PRIMARY KEY,
-    key       TEXT NOT NULL UNIQUE,
-    surface   TEXT NOT NULL,
-    reading   TEXT,
-    pos       TEXT,
-    has_kanji INTEGER NOT NULL DEFAULT 1
+    id          INTEGER PRIMARY KEY,
+    key         TEXT NOT NULL UNIQUE,
+    surface     TEXT NOT NULL,
+    reading     TEXT,
+    pos         TEXT,
+    has_kanji   INTEGER NOT NULL DEFAULT 1,
+    is_compound INTEGER NOT NULL DEFAULT 0,
+    part_keys   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS occurrence (
@@ -61,7 +63,8 @@ CREATE TABLE IF NOT EXISTS candidate (
     bccwj_rank          INTEGER,
     example_sentence_id INTEGER REFERENCES sentence(id),
     status              TEXT    NOT NULL DEFAULT 'PENDING',
-    decided_at          TEXT
+    decided_at          TEXT,
+    exported_at         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidate_status ON candidate(status);

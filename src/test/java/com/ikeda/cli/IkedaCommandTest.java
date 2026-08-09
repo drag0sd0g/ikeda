@@ -25,7 +25,8 @@ class IkedaCommandTest {
     @DisplayName("exposes every command as a subcommand")
     void exposesSubcommands() {
         assertThat(cli.getSubcommands()).containsOnlyKeys(
-                "ingest", "anki", "sample", "export", "verdicts", "status");
+                "ingest", "anki", "sample", "export", "verdicts", "status",
+                "compounds", "cards");
     }
 
     @Test
@@ -80,6 +81,26 @@ class IkedaCommandTest {
     @DisplayName("requires a sheet for verdicts")
     void requiresVerdictsSheet() {
         assertThat(runCapturingErr("verdicts")).contains("Missing required parameter");
+    }
+
+    @Test
+    @DisplayName("parses card options")
+    void parsesCardOptions() {
+        cli.parseArgs("cards", "-n", "25", "--dry-run");
+        CardsCommand cards = cli.getSubcommands().get("cards").getCommand();
+
+        assertThat(cards.limit).isEqualTo(25);
+        assertThat(cards.dryRun).isTrue();
+    }
+
+    @Test
+    @DisplayName("parses compound thresholds")
+    void parsesCompoundOptions() {
+        cli.parseArgs("compounds", "-d", "12", "-a", "4.5");
+        CompoundsCommand compounds = cli.getSubcommands().get("compounds").getCommand();
+
+        assertThat(compounds.minDocuments).isEqualTo(12);
+        assertThat(compounds.minAssociation).isEqualTo(4.5);
     }
 
     @Test

@@ -36,8 +36,8 @@ class AnkiConnectHttpTest {
             exchange.close();
         });
         server.start();
-        return new AnkiConnect("http://127.0.0.1:" + server.getAddress().getPort(),
-                HttpClient.newHttpClient());
+        return new AnkiConnect(new AnkiGateway(
+                "http://127.0.0.1:" + server.getAddress().getPort(), HttpClient.newHttpClient()));
     }
 
     @AfterEach
@@ -92,7 +92,8 @@ class AnkiConnectHttpTest {
     @Test
     @DisplayName("reports unavailable rather than throwing when nothing is listening")
     void reportsUnavailable() {
-        var anki = new AnkiConnect("http://127.0.0.1:1", HttpClient.newHttpClient());
+        var anki = new AnkiConnect(
+                new AnkiGateway("http://127.0.0.1:1", HttpClient.newHttpClient()));
 
         assertThat(anki.isAvailable()).isFalse();
     }

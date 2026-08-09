@@ -1,17 +1,10 @@
 package com.ikeda.anki;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -19,8 +12,6 @@ import java.util.regex.Pattern;
 public final class AnkiConnect {
     private static final Logger log = LoggerFactory.getLogger(AnkiConnect.class);
 
-    private static final String DEFAULT_ENDPOINT = "http://127.0.0.1:8765";
-    private static final int API_VERSION = 6;
     private static final int BATCH_SIZE = 1000;
 
     private static final List<String> HEADWORD_FIELDS =
@@ -36,43 +27,34 @@ public final class AnkiConnect {
             {"&quot;", "\""}, {"&#39;", "'"}, {"&amp;", "&"},
     };
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final HttpClient httpClient;
-    private final String endpoint;
+    private final AnkiGateway gateway;
 
-    public AnkiConnect(String endpoint, HttpClient httpClient) {
-        this.endpoint = endpoint;
-        this.httpClient = httpClient;
+    public AnkiConnect(AnkiGateway gateway) {
+        this.gateway = gateway;
     }
 
     public static AnkiConnect withDefaults() {
-        return new AnkiConnect(DEFAULT_ENDPOINT, HttpClient.newHttpClient());
+        return new AnkiConnect(AnkiGateway.withDefaults());
     }
 
     public boolean isAvailable() {
-        try {
-            invoke("version", null);
-            return true;
-        } catch (AnkiException e) {
-            log.debug("AnkiConnect unavailable: {}", e.getMessage());
-            return false;
-        }
+        return gateway.isAvailable();
     }
 
     public List<String> headwords() {
-        JsonNode ids = invoke("findNotes", MAPPER.createObjectNode().put("query", "deck:*"));
+        JsonNode ids = gateway.invoke("findNotes", gateway.params().put("query", "deck:*"));
         var headwords = new ArrayList<String>();
 
         for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
-            var batch = MAPPER.createArrayNode();
+            var batch = gateway.array();
             for (int i = start; i < Math.min(start + BATCH_SIZE, ids.size()); i++) {
                 batch.add(ids.get(i).asLong());
             }
-            ObjectNode params = MAPPER.createObjectNode();
+            ObjectNode params = gateway.params();
             params.set("notes", batch);
 
-            for (JsonNode note : invoke("notesInfo", params)) {
+            for (JsonNode note : gateway.invoke("notesInfo", params)) {
                 headwords.addAll(extractHeadwords(note));
             }
         }
@@ -109,33 +91,4 @@ public final class AnkiConnect {
         return text.replace('\u00A0', ' ').replace('\u3000', ' ').strip();
     }
 
-    private JsonNode invoke(String action, JsonNode params) {
-        ObjectNode body = MAPPER.createObjectNode()
-                .put("action", action)
-                .put("version", API_VERSION);
-        if (params != null) {
-            body.set("params", params);
-        }
-        try {
-            HttpResponse<String> response = httpClient.send(
-                    HttpRequest.newBuilder(URI.create(endpoint))
-                            .header("Content-Type", "application/json")
-                            .POST(HttpRequest.BodyPublishers.ofString(
-                                    body.toString(), StandardCharsets.UTF_8))
-                            .build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-
-            JsonNode parsed = MAPPER.readTree(response.body());
-            if (!parsed.path("error").isNull() && parsed.hasNonNull("error")) {
-                throw new AnkiException("AnkiConnect error: " + parsed.get("error").asText());
-            }
-            return parsed.path("result");
-
-        } catch (IOException e) {
-            throw new AnkiException("cannot reach AnkiConnect at " + endpoint, e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AnkiException("interrupted talking to AnkiConnect", e);
-        }
-    }
 }
