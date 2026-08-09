@@ -111,7 +111,7 @@ EDINET API v2
 
 **Package layout.** `ingest` fetches and extracts; `analyse` segments, tokenises and selects examples; `compound` reconstructs multi-word terms; `rank` holds the frequency baseline; `gloss` resolves meanings; `anki` reads the collection and writes cards; `review` is the sheet format; `card` is the note model; `store` is persistence; `cli` is the command layer; `support` is shared text utilities.
 
-**Commands.** `ingest`, `anki`, `compounds`, `sample`, `export`, `verdicts`, `cards`, `status`.
+**Commands.** `ingest`, `anki`, `compounds`, `review`, `sample`, `export`, `verdicts`, `cards`, `coverage`, `status`.
 
 ---
 
@@ -202,7 +202,7 @@ A term becomes a candidate only if all hold:
 | Content part of speech | Nouns, verbs, adjectives, adverbs |
 | Length ≥ 2 characters | Single characters are fragments |
 | Contains at least one kanji | See §2.2 |
-| Document frequency ≥ 5% of the corpus | Below this a term is one company's jargon rather than the domain's vocabulary |
+| Document frequency ≥ 5% of the corpus | Below this a term is one company's jargon rather than the domain's vocabulary. Derived from the corpus size rather than fixed, so that ingesting more filings tightens the filter instead of loosening it |
 | Not in the known set | Never propose a confirmed known word |
 
 The dispersion floor is the single most effective filter, removing roughly three quarters of the vocabulary.
@@ -238,6 +238,18 @@ For the count to be meaningful, the known set used here is broader than the conf
 Meanings come from JMdict, a free Japanese-English dictionary. Coverage of general vocabulary is good; coverage of financial compounds is partial, and some entries carry a literal sense rather than the business one.
 
 Where JMdict has no entry the meaning field is left **empty rather than guessed**. A card with a word, a reading and an authentic example is still useful; a card with an invented meaning is worse than none.
+
+### 5.11 Coverage
+
+Coverage answers the question the project exists to move: *what proportion of a filing can already be read without looking anything up?*
+
+It is measured over **occurrences rather than distinct words**, because reading happens token by token. A word met two hundred times contributes two hundred times more to comprehension than one met once, so counting vocabulary size would flatter the reader and mislead about progress.
+
+It is reported **twice**, against two definitions of what the reader knows. The confirmed set holds only words explicitly recorded as known, and is a severe underestimate: most of what a competent reader knows was never written down anywhere. The estimated set additionally assumes the commonest tens of thousands of words of general Japanese, which is a reasonable prior for a reader at this level. Neither figure is the truth on its own — the first is a floor and the second a working estimate — and reporting one alone would be misleading.
+
+Alongside the current figure, coverage reports **how many further words would reach each of several thresholds**, choosing them in descending order of frequency because the most frequent unknown word always buys the most comprehension per card. The conventional thresholds are 90%, 95% and 98%: below roughly 95% a text needs constant lookup, and around 98% it can be read continuously with meaning inferred from context.
+
+This turns an open-ended queue into a finite target, and gives a principled answer to when studying a corpus is finished.
 
 ---
 

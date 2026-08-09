@@ -26,7 +26,7 @@ class IkedaCommandTest {
     void exposesSubcommands() {
         assertThat(cli.getSubcommands()).containsOnlyKeys(
                 "ingest", "anki", "sample", "export", "verdicts", "status",
-                "compounds", "cards", "review");
+                "compounds", "cards", "review", "coverage");
     }
 
     @Test
@@ -111,6 +111,15 @@ class IkedaCommandTest {
 
         assertThat(review.port).isEqualTo(9000);
         assertThat(review.noBrowser).isTrue();
+    }
+
+    @Test
+    @DisplayName("parses a coverage scope")
+    void parsesCoverageScope() {
+        cli.parseArgs("coverage", "--doc", "S100YLJZ");
+        CoverageCommand coverage = cli.getSubcommands().get("coverage").getCommand();
+
+        assertThat(coverage.docId).isEqualTo("S100YLJZ");
     }
 
     @Test

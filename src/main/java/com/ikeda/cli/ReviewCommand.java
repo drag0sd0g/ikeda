@@ -21,7 +21,7 @@ public final class ReviewCommand implements Runnable {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewCommand.class);
 
-    private static final int DEFAULT_DISPERSION = 9;
+    private static final double DISPERSION_FRACTION = 0.05;
 
     @Option(names = {"-p", "--port"}, description = "Port to listen on, 0 to pick any free one.")
     int port = 8770;
@@ -43,7 +43,7 @@ public final class ReviewCommand implements Runnable {
     public void run() {
         try (Database database = workspace.openDatabase()) {
             var candidates = new CandidateStore(database);
-            candidates.populate(DEFAULT_DISPERSION, workspace.baseline());
+            candidates.populate(DISPERSION_FRACTION, workspace.baseline());
 
             var queue = new ReviewQueue(candidates, new SentenceStore(database),
                     new CompoundStore(database), new VerdictRecorder(database),

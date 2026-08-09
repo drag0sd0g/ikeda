@@ -78,6 +78,12 @@ public final class CandidateStore {
         this.database = database;
     }
 
+    public int populate(double dispersionFraction, BaselineRanking baseline) {
+        long filings = database.count(Database.Table.FILING);
+        int minDocumentFrequency = Math.max(2, (int) Math.ceil(dispersionFraction * filings));
+        return populate(minDocumentFrequency, baseline);
+    }
+
     public int populate(int minDocumentFrequency, BaselineRanking baseline) {
         try {
             try (PreparedStatement statement =

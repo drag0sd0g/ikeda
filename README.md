@@ -87,6 +87,9 @@ set -a; source .env; set +a
 ./gradlew run --args="cards --dry-run"
 ./gradlew run --args="cards"
 
+# How much of the corpus can you already read?
+./gradlew run --args="coverage"
+
 ./gradlew run --args="status"
 ```
 
