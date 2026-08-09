@@ -59,10 +59,11 @@ public final class CompoundStore {
             int stored = 0;
             try (PreparedStatement insertTerm = database.connection().prepareStatement("""
                          INSERT INTO term (key, surface, reading, pos, has_kanji,
-                                           is_compound, part_keys)
-                         VALUES (?, ?, '', ?, 1, 1, ?)
+                                           is_compound, part_keys, part_units)
+                         VALUES (?, ?, '', ?, 1, 1, ?, ?)
                          ON CONFLICT(key) DO UPDATE SET is_compound = 1,
-                                                        part_keys = excluded.part_keys
+                                                        part_keys = excluded.part_keys,
+                                                        part_units = excluded.part_units
                          RETURNING id
                          """);
                  PreparedStatement insertOccurrence = database.connection().prepareStatement("""
@@ -76,6 +77,7 @@ public final class CompoundStore {
                     insertTerm.setString(2, surface);
                     insertTerm.setString(3, com.ikeda.analyse.PartOfSpeech.NOUN.label());
                     insertTerm.setString(4, String.join(PART_SEPARATOR, compound.candidate().parts()));
+                    insertTerm.setString(5, String.join(PART_SEPARATOR, compound.candidate().shortUnits()));
 
                     long termId;
                     try (ResultSet rs = insertTerm.executeQuery()) {

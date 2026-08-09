@@ -35,6 +35,11 @@ class CandidateStoreTest {
             public java.util.Set<String> commonest(int limit) {
                 return java.util.Set.of();
             }
+
+            @Override
+            public int rarerThanAll() {
+                return Integer.MAX_VALUE;
+            }
         };
     }
 

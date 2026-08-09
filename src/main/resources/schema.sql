@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS term (
     pos         TEXT,
     has_kanji   INTEGER NOT NULL DEFAULT 1,
     is_compound INTEGER NOT NULL DEFAULT 0,
-    part_keys   TEXT
+    part_keys   TEXT,
+    part_units  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS occurrence (
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS candidate (
     corpus_frequency    INTEGER NOT NULL,
     document_frequency  INTEGER NOT NULL,
     bccwj_rank          INTEGER,
+    effective_rank      INTEGER,
     example_sentence_id INTEGER REFERENCES sentence(id),
     status              TEXT    NOT NULL DEFAULT 'PENDING',
     decided_at          TEXT,
@@ -68,7 +70,7 @@ CREATE TABLE IF NOT EXISTS candidate (
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidate_status ON candidate(status);
-CREATE INDEX IF NOT EXISTS idx_candidate_rank ON candidate(bccwj_rank);
+CREATE INDEX IF NOT EXISTS idx_candidate_rank ON candidate(effective_rank);
 
 CREATE INDEX IF NOT EXISTS idx_occurrence_term_doc ON occurrence(term_id, doc_id);
 

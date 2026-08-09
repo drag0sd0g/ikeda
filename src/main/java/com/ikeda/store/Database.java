@@ -81,6 +81,8 @@ public final class Database implements AutoCloseable {
         addColumnIfMissing("candidate", "exported_at", "TEXT");
         addColumnIfMissing("term", "is_compound", "INTEGER NOT NULL DEFAULT 0");
         addColumnIfMissing("term", "part_keys", "TEXT");
+        addColumnIfMissing("term", "part_units", "TEXT");
+        addColumnIfMissing("candidate", "effective_rank", "INTEGER");
         if (addColumnIfMissing("term", "has_kanji", "INTEGER NOT NULL DEFAULT 1")) {
             backfillHasKanji();
         }

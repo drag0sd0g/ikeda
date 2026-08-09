@@ -73,6 +73,11 @@ public final class Baseline implements BaselineRanking {
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
+    @Override
+    public int rarerThanAll() {
+        return ranks.size() + 1;
+    }
+
     public int size() {
         return ranks.size();
     }
