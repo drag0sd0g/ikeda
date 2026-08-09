@@ -8,6 +8,7 @@ import com.worksap.nlp.sudachi.Tokenizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class NounRunDetector {
 
@@ -50,7 +51,8 @@ public final class NounRunDetector {
         List<String> shortUnits = run.stream()
                 .flatMap(morpheme -> shortUnitsOf(morpheme).stream())
                 .toList();
-        found.add(new CompoundCandidate(String.join("", parts), parts, shortUnits));
+        String reading = run.stream().map(Morpheme::readingForm).collect(Collectors.joining());
+        found.add(new CompoundCandidate(String.join("", parts), reading, parts, shortUnits));
     }
 
     private static List<String> shortUnitsOf(Morpheme morpheme) {
