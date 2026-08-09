@@ -1,5 +1,7 @@
 # Ikeda
 
+<img width="1254" height="1254" alt="ikeda_logo" src="https://github.com/user-attachments/assets/bf9e1e31-e7b3-4f07-a076-955577c721ab" />
+
 Finds the financial-Japanese vocabulary you don't know yet.
 
 Ikeda reads Japanese annual reports (有価証券報告書) from EDINET, works out which words in them you're missing, ranks them so the useful ones come first, and turns the result into Anki cards carrying real sentences from real filings.
@@ -8,7 +10,19 @@ It exists because the prioritisation problem is unsolved. Popup dictionaries han
 
 ## What it produces
 
-A review sheet, rarest words first:
+Anki cards, one per word, carrying a real sentence from a real filing:
+
+```
+Expression   条項
+Reading      ジョウコウ
+Meaning      clause; article; stipulations
+Example      契約ごとに条項は異なりますが、主なものは次のとおりであります。
+Source       株式会社平和 · 2026-06-26 · S100YM5Z
+```
+
+They go into their own deck, `金融::有報`, and nothing else in your collection is touched.
+
+Before a word becomes a card you see it in a review sheet, rarest words first:
 
 ```
 verdict  term      reading        docs  total  example
@@ -24,7 +38,7 @@ You mark each row `k` (already know it), `w` (worth a card) or `n` (not worth it
 - Java 25
 - An [EDINET API key](https://api.edinet-fsa.go.jp/api/auth/index.aspx?mode=1) — free, email registration
 - Anki running with the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on
-- Two data files that can't be redistributed, downloaded separately (below)
+- Three data files that aren't included here, downloaded separately (below)
 
 ## Setup
 
@@ -40,6 +54,12 @@ unzip -j /tmp/dict.zip '*/system_core.dic' -d dict/
 mkdir -p baseline
 curl -L https://repository.ninjal.ac.jp/record/3234/files/BCCWJ_frequencylist_suw_ver1_0.zip -o /tmp/bccwj.zip
 unzip -j /tmp/bccwj.zip -d baseline/
+
+# JMdict, for the English meanings on cards
+mkdir -p dictionary
+curl -sL "$(curl -s https://api.github.com/repos/scriptin/jmdict-simplified/releases/latest \
+  | grep -o 'https://[^"]*jmdict-eng-[^"]*\.json\.zip' | grep -v common | head -1)" -o /tmp/jmdict.zip
+unzip -o -q /tmp/jmdict.zip -d dictionary/
 ```
 
 ## Usage
@@ -53,11 +73,18 @@ set -a; source .env; set +a
 # Load your Anki collection, so known words are never proposed
 ./gradlew run --args="anki"
 
+# Rebuild the multi-word terms the tokeniser splits apart
+./gradlew run --args="compounds"
+
 # Write a batch to review
 ./gradlew run --args="sample -n 150 -o review_batch.tsv"
 
 # ...fill in the verdict column, then
 ./gradlew run --args="verdicts review_batch.tsv"
+
+# Build cards for everything you marked worth learning
+./gradlew run --args="cards --dry-run"
+./gradlew run --args="cards"
 
 ./gradlew run --args="status"
 ```
@@ -66,8 +93,8 @@ Ingestion is rate-limited to one request every four seconds and takes about fift
 
 ## Design
 
-See [docs/technical-design-document.md](docs/technical-design-document.md) for how the ranking works, what was measured, and which approaches were tried and rejected.
+See [docs/technical-design-document.md](docs/technical-design-document.md) for how the ranking works, and for the properties of Japanese and of Japanese corporate disclosure that shape the pipeline.
 
 ## Licence
 
-MIT. The Sudachi dictionary, the BCCWJ frequency list and EDINET filings are covered by their own terms and are not included in this repository.
+MIT. The Sudachi dictionary, the BCCWJ frequency list, JMdict and EDINET filings are covered by their own terms and are not included in this repository. JMdict is used under Creative Commons Attribution-ShareAlike, © the Electronic Dictionary Research and Development Group.
