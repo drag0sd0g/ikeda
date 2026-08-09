@@ -57,6 +57,24 @@ class NounRunDetectorTest {
     }
 
     @Test
+    @DisplayName("reads the compound as its parts were read in the text")
+    void recordsReading() {
+        CompoundCandidate compound = detect("繰延税金資産の回収可能性を判断しております。").stream()
+                .filter(c -> c.surface().equals("繰延税金資産"))
+                .findFirst().orElseThrow();
+
+        assertThat(compound.reading()).isEqualTo("クリノベゼイキンシサン");
+    }
+
+    @Test
+    @DisplayName("gives every compound a reading, since a card without one is unusable")
+    void everyCompoundHasAReading() {
+        assertThat(detect("貸倒引当金と退職給付債務を計上しております。"))
+                .isNotEmpty()
+                .allSatisfy(compound -> assertThat(compound.reading()).isNotBlank());
+    }
+
+    @Test
     @DisplayName("records short units, which is the granularity a frequency baseline uses")
     void recordsShortUnits() {
         CompoundCandidate compound = detect("繰延税金資産の回収可能性を判断しております。").stream()
