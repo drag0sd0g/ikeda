@@ -184,6 +184,24 @@ public final class CandidateStore {
         return updated;
     }
 
+    public Optional<Integer> baselineRankOf(long termId) {
+        return database.queryOne("""
+                        SELECT effective_rank FROM candidate
+                        WHERE term_id = ? AND effective_rank IS NOT NULL
+                        """,
+                statement -> statement.setLong(1, termId),
+                row -> row.getInt("effective_rank"));
+    }
+
+    public int resetVerdict(String term) {
+        return database.update("""
+                        UPDATE candidate
+                        SET status = 'PENDING', decided_at = NULL
+                        WHERE term_id = (SELECT id FROM term WHERE key = ?)
+                        """,
+                statement -> statement.setString(1, term));
+    }
+
     public Map<CandidateStatus, Long> verdictCounts() {
         var counts = new EnumMap<CandidateStatus, Long>(CandidateStatus.class);
         for (CandidateStatus status : CandidateStatus.values()) {

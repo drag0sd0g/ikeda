@@ -8,6 +8,7 @@ import com.ikeda.gloss.Gloss;
 import com.ikeda.gloss.GlossSource;
 import com.ikeda.store.CardStore;
 import com.ikeda.store.Database;
+import com.ikeda.store.SentenceStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
@@ -50,6 +51,7 @@ public final class CardsCommand implements Runnable {
 
         try (Database database = workspace.openDatabase()) {
             var store = new CardStore(database);
+            var sentences = new SentenceStore(database);
             Set<String> known = new java.util.HashSet<>(store.knownLemmas());
             known.addAll(workspace.baseline().commonest(COMMON_JAPANESE_WORDS));
             List<CardStore.Pending> pending = store.awaitingExport(limit);
@@ -70,7 +72,7 @@ public final class CardsCommand implements Runnable {
                     withoutGloss++;
                 }
                 Optional<ExampleSelector.SentenceContext> example =
-                        selectExample(store, selector, word, known);
+                        selectExample(sentences, selector, word, known);
                 if (example.isEmpty()) {
                     withoutExample++;
                     continue;
@@ -81,8 +83,8 @@ public final class CardsCommand implements Runnable {
                         word.reading(),
                         gloss.map(Gloss::meaningLine).orElse(""),
                         example.get().text(),
-                        store.sourceOf(sentenceId),
-                        store.docIdOf(sentenceId),
+                        sentences.sourceOf(sentenceId),
+                        sentences.docIdOf(sentenceId),
                         word.bccwjRank(),
                         word.documentFrequency()));
                 exported.add(word.termId());
@@ -111,13 +113,15 @@ public final class CardsCommand implements Runnable {
     }
 
     private Optional<ExampleSelector.SentenceContext> selectExample(
-            CardStore store, ExampleSelector selector, CardStore.Pending word, Set<String> known) {
+            SentenceStore sentences, ExampleSelector selector,
+            CardStore.Pending word, Set<String> known) {
 
-        List<ExampleSelector.SentenceContext> sentences = store.sentencesFor(word.termId()).stream()
+        List<ExampleSelector.SentenceContext> contexts = sentences.forTerm(word.termId(), 200)
+                .stream()
                 .map(sentence -> new ExampleSelector.SentenceContext(
                         sentence.sentenceId(), sentence.text(),
-                        store.termsIn(sentence.sentenceId())))
+                        sentences.termsIn(sentence.sentenceId())))
                 .toList();
-        return selector.select(word.key(), sentences, known);
+        return selector.select(word.key(), contexts, known);
     }
 }

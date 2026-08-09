@@ -13,6 +13,7 @@ import picocli.CommandLine.Command;
                 SampleCommand.class,
                 ExportCommand.class,
                 VerdictsCommand.class,
+                ReviewCommand.class,
                 CompoundsCommand.class,
                 CardsCommand.class,
                 StatusCommand.class,

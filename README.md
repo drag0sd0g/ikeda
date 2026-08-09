@@ -22,7 +22,7 @@ Source       株式会社平和 · 2026-06-26 · S100YM5Z
 
 They go into their own deck, `金融::有報`, and nothing else in your collection is touched.
 
-Before a word becomes a card you see it in a review sheet, rarest words first:
+Before a word becomes a card you judge it yourself, rarest words first — in the browser, or in a spreadsheet if you prefer:
 
 ```
 verdict  term      reading        docs  total  example
@@ -76,10 +76,11 @@ set -a; source .env; set +a
 # Rebuild the multi-word terms the tokeniser splits apart
 ./gradlew run --args="compounds"
 
-# Write a batch to review
-./gradlew run --args="sample -n 150 -o review_batch.tsv"
+# Review in the browser — k / w / n, space to reveal the meaning, u to undo
+./gradlew run --args="review"
 
-# ...fill in the verdict column, then
+# ...or work from a spreadsheet instead
+./gradlew run --args="sample -n 150 -o review_batch.tsv"
 ./gradlew run --args="verdicts review_batch.tsv"
 
 # Build cards for everything you marked worth learning

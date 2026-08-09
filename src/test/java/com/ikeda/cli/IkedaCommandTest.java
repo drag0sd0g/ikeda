@@ -26,7 +26,7 @@ class IkedaCommandTest {
     void exposesSubcommands() {
         assertThat(cli.getSubcommands()).containsOnlyKeys(
                 "ingest", "anki", "sample", "export", "verdicts", "status",
-                "compounds", "cards");
+                "compounds", "cards", "review");
     }
 
     @Test
@@ -101,6 +101,16 @@ class IkedaCommandTest {
 
         assertThat(compounds.minDocuments).isEqualTo(12);
         assertThat(compounds.minAssociation).isEqualTo(4.5);
+    }
+
+    @Test
+    @DisplayName("parses review options")
+    void parsesReviewOptions() {
+        cli.parseArgs("review", "-p", "9000", "--no-browser");
+        ReviewCommand review = cli.getSubcommands().get("review").getCommand();
+
+        assertThat(review.port).isEqualTo(9000);
+        assertThat(review.noBrowser).isTrue();
     }
 
     @Test

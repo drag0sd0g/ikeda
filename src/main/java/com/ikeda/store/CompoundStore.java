@@ -106,6 +106,14 @@ public final class CompoundStore {
         }
     }
 
+    public List<String> partsFor(long termId) {
+        return database.queryOne("SELECT part_keys FROM term WHERE id = ? AND is_compound = 1",
+                        statement -> statement.setLong(1, termId),
+                        row -> row.getString("part_keys"))
+                .map(CompoundStore::partsOf)
+                .orElseGet(List::of);
+    }
+
     public List<String> compoundKeys() {
         return database.query("SELECT key FROM term WHERE is_compound = 1",
                 Sql.Binder.NONE, row -> row.getString("key"));
