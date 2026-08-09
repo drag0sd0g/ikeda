@@ -64,40 +64,97 @@ unzip -o -q /tmp/jmdict.zip -d dictionary/
 
 ## Usage
 
+The steps below depend on each other and are meant to be run in this order the first
+time. After that, only the last four are part of the regular rhythm.
+
 ```bash
 set -a; source .env; set +a
-
-# Build the corpus. Filings cluster in late June for March year-ends.
-./gradlew run --args="ingest 2026-06-26"
-
-# Load your Anki collection, so known words are never proposed
-./gradlew run --args="anki"
-
-# Rebuild the multi-word terms the tokeniser splits apart
-./gradlew run --args="compounds"
-
-# Review in the browser — k / w / n, space to reveal the meaning, u to undo
-./gradlew run --args="review"
-
-# ...or work from a spreadsheet instead
-./gradlew run --args="sample -n 150 -o review_batch.tsv"
-./gradlew run --args="verdicts review_batch.tsv"
-
-# Build cards for everything you marked worth learning
-./gradlew run --args="cards --dry-run"
-./gradlew run --args="cards"
-
-# How much of the corpus can you already read?
-./gradlew run --args="coverage"
-
-./gradlew run --args="status"
 ```
 
-Ingestion is rate-limited to one request every four seconds and takes about fifteen minutes for a full day of filings. It's safe to interrupt — filings already stored are skipped on the next run.
+**1. Build the corpus.** Annual reports cluster in late June, for companies with a
+March year end. Pick a weekday in that window; a busy one carries 400 or more filings.
+
+```bash
+./gradlew run --args="ingest 2026-06-26"
+```
+
+Requests are paced at one every four seconds, so a quiet day takes about fifteen
+minutes and a busy one closer to half an hour. Interrupt it freely — filings already
+stored are skipped when you run it again. Run it for several dates to widen the
+corpus; more filings make the ranking more trustworthy.
+
+**2. Load your Anki collection.** Everything already carded is treated as known and
+will never be proposed. Do this before reviewing, or you will be shown words you know.
+
+```bash
+./gradlew run --args="anki"
+```
+
+**3. Rebuild multi-word terms.** The tokeniser splits terms like 繰延税金資産 into
+pieces; this puts them back together. Run it after any ingestion.
+
+```bash
+./gradlew run --args="compounds"
+```
+
+**4. Review.** Opens a small page in your browser: `k` if you already know the word,
+`w` if it is worth a card, `n` if it is not. Space reveals the English meaning, `u`
+undoes the last verdict. Every verdict is saved as you make it, so you can stop
+whenever you like.
+
+```bash
+./gradlew run --args="review"
+```
+
+The command keeps running until you press Ctrl+C — that is the server behind the page.
+If a browser does not open, go to `http://127.0.0.1:8770`.
+
+Prefer a spreadsheet? Export a batch, fill in the verdict column, and read it back:
+
+```bash
+./gradlew run --args="sample -n 150 -o review_batch.tsv"
+./gradlew run --args="verdicts review_batch.tsv"
+```
+
+**5. Build the cards.** Only words you marked `w` become cards, and only once.
+
+```bash
+./gradlew run --args="cards --dry-run"   # see what would be created
+./gradlew run --args="cards"
+```
+
+**6. Study them in Anki.** The cards are in `金融::有報`, ready to review like any
+other deck. This is the point of the whole exercise; the steps above only decide what
+goes in front of you.
+
+**Where you stand**, any time:
+
+```bash
+./gradlew run --args="coverage"   # how much of a filing you can already read
+./gradlew run --args="status"     # corpus and review counts
+./gradlew run --args="export"     # every verdict you have given, as a sheet
+```
+
+## When something goes wrong
+
+**"AnkiConnect is not responding"** — Anki must be open, with the add-on installed,
+for the `anki` and `cards` commands. Nothing else needs it.
+
+**"no filings matched"** — that date has no annual reports. Most days do not. Try a
+weekday in late June, or late March for September year ends.
+
+**The review page is empty** — every candidate has a verdict. Ingest more dates, or
+run `cards` to build what you kept.
+
+**Cards have no meaning field** — the dictionary has no entry for that word, which is
+common for domain compounds. The card still carries its reading and a real example.
 
 ## Design
 
 See [docs/technical-design-document.md](docs/technical-design-document.md) for how the ranking works, and for the properties of Japanese and of Japanese corporate disclosure that shape the pipeline.
+
+Ikeda only ever adds notes to its own deck. It never modifies, moves or deletes
+anything else in your collection.
 
 ## Licence
 

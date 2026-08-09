@@ -283,6 +283,8 @@ candidate(term_id PK, corpus_frequency, document_frequency, bccwj_rank, effectiv
 
 **`has_kanji` is stored rather than computed** because SQLite has no character-class matching for CJK.
 
+**A candidate moves through three states.** It is created as `PENDING`, gains a verdict when reviewed, and is stamped with `exported_at` once a card has been built from it. Only words judged worth learning are ever exported, and only once; the stamp is what makes card generation repeatable without producing duplicates. A verdict can be withdrawn, returning the word to the queue.
+
 **`candidate.status`** records the reviewer's verdict — `PENDING`, `KNOWN`, `WORTH_LEARNING`, `NOT_WORTH_LEARNING`. Three outcomes rather than two, because "I already know it" and "not worth a card" carry different diagnoses: the first says the known-set model is wrong, the second says the ranking is. Re-populating candidates leaves verdicts untouched.
 
 **Schema changes** add columns in place at startup. Anything more involved should be a rebuild, since the corpus is always reproducible from the source API.
@@ -345,7 +347,23 @@ Corpus data, the dictionary, the baseline and the glossary are never committed. 
 
 ---
 
-## 10. Observability and testing
+## 10. Operational behaviour
+
+**Ingestion is atomic per filing.** A filing and everything derived from it — its narrative blocks, sentences, terms and occurrences — are written in a single transaction. A filing is therefore either wholly present or wholly absent, never half-written.
+
+**Ingestion is resumable.** Filings already stored are skipped before they are fetched, so an interrupted run costs nothing and a repeated one costs only the listing request. This matters because the source API is paced at one request every four seconds, making a full day's ingestion a quarter of an hour or more.
+
+**A single unreadable filing does not end a run.** Fetch and parse failures are counted and logged, and the run continues. The alternative — aborting on the first malformed document — would make long ingestions hostage to any one bad file.
+
+**Schema changes are applied in place at startup.** Missing columns are added, and derived values are backfilled once. A file created by an earlier version therefore opens and upgrades rather than failing, which matters because the corpus is expensive to rebuild. Anything more involved than adding a column is deliberately not supported: the corpus is always reproducible from the source API, so a rebuild is the honest answer to a structural change.
+
+**Verdicts survive everything else.** Re-populating candidates refreshes counts, ranks and examples but never touches a verdict, and only undecided candidates are removed when the known set grows. Human judgement is the one artifact in the system that cannot be regenerated.
+
+**Scale.** At around seven hundred filings the corpus holds roughly half a million sentences and approaching twelve million word occurrences, and the database file is a little over a gigabyte. Ingestion is dominated by the API's rate limit rather than by processing; compound detection over the whole corpus takes seconds, and ranking a full candidate pool takes a few seconds more.
+
+---
+
+## 11. Observability and testing
 
 **Stage counters are mandatory.** Every stage logs items in, items out, and the reason for the difference. A silent zero at any stage is indistinguishable from correct operation without them.
 
@@ -358,3 +376,7 @@ Corpus data, the dictionary, the baseline and the glossary are never committed. 
 - The Anki transport is tested against a real in-process HTTP server rather than a mocked client
 - Schema migration is tested by opening databases built to older shapes
 - One end-to-end test carries a word from a source bundle through to a review sheet and its retirement from the candidate pool
+
+**Continuous integration** builds and tests every push to the main branch and every proposed change. The morphological analyser's dictionary is cached rather than skipped, because several tests are meaningless without it.
+
+That last point carries a trap worth naming: those tests are written to skip when the dictionary is absent, which is right on a developer's machine and dangerous in an automated build, where a green result would mean the tokeniser was never exercised at all. A dedicated test therefore fails the build when the dictionary is missing, and runs only in an automated environment. **A passing build must not be able to mean that nothing was tested.**
